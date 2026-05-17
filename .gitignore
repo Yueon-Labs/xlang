@@ -1,0 +1,25 @@
+# macOS
+.DS_Store
+
+# editor
+.vscode/
+.idea/
+
+# build outputs
+build/
+dist/
+target/
+out/
+*.o
+*.a
+*.so
+*.dylib
+*.dll
+*.exe
+
+# logs
+*.log
+
+# temporary
+.tmp/
+tmp/
