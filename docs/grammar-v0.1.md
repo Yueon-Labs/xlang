@@ -1,4 +1,4 @@
-# NTS Grammar v0.1 Draft
+# X Language Grammar v0.1 Draft
 
 This is a small readable grammar sketch, not the final parser grammar.
 
@@ -58,7 +58,7 @@ primary        = literal | ident | call | field_access | "(", expr, ")" ;
 
 ## Canonical `if else`
 
-```nts
+```x
 if age >= 18 {
     return 1
 } else {
@@ -66,9 +66,9 @@ if age >= 18 {
 }
 ```
 
-Invalid in NTS:
+Invalid in X Language:
 
-```nts
+```x
 if (age >= 18) { return 1 }
 if age { return 1 }
 if age >= 18 return 1

@@ -1,6 +1,6 @@
-# NTS Language Specification v0.1 Draft
+# X Language Specification v0.1 Draft
 
-NTS is an AI-first, TypeScript-like systems language designed for static analysis and high-performance compilation.
+X Language is an AI-first, TypeScript-like systems language designed for static analysis and high-performance compilation.
 
 ## Core principles
 
@@ -14,7 +14,7 @@ NTS is an AI-first, TypeScript-like systems language designed for static analysi
 
 ## Modules
 
-```nts
+```x
 module main
 
 import fs
@@ -23,7 +23,7 @@ import math.vector
 
 ## Functions
 
-```nts
+```x
 fn add(a: i32, b: i32): i32 {
     return a + b
 }
@@ -38,7 +38,7 @@ Rules:
 
 ## Variables
 
-```nts
+```x
 let x: i32 = 1
 let mut total: i64 = 0
 ```
@@ -51,7 +51,7 @@ Rules:
 
 ## If / else
 
-```nts
+```x
 if condition {
     // statements
 } else if other_condition {
@@ -71,7 +71,7 @@ Rules:
 
 ## Structs
 
-```nts
+```x
 struct User {
     id: i64
     name: String
@@ -87,13 +87,13 @@ Rules:
 
 ## Type aliases
 
-```nts
+```x
 type UserId = i64
 ```
 
 ## Option
 
-```nts
+```x
 let age: Option<i32> = Some(18)
 let missing: Option<i32> = None
 ```
@@ -102,7 +102,7 @@ let missing: Option<i32> = None
 
 ## Result
 
-```nts
+```x
 fn divide(a: f64, b: f64): Result<f64, String> {
     if b == 0.0 {
         return Err("divide by zero")

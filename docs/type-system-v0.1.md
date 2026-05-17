@@ -1,4 +1,4 @@
-# NTS Type System v0.1 Draft
+# X Language Type System v0.1 Draft
 
 ## Built-in types
 
@@ -20,7 +20,7 @@ Slice<T>
 
 Invalid:
 
-```nts
+```x
 let x: i32 = 1.0
 if 1 {
     return 1
@@ -29,7 +29,7 @@ if 1 {
 
 Valid:
 
-```nts
+```x
 let x: i32 = 1
 if x != 0 {
     return 1
@@ -47,7 +47,7 @@ Machine-readable diagnostic example:
   "severity": "error",
   "code": "E_IF_CONDITION_NOT_BOOL",
   "message": "if condition must be bool, got i32",
-  "span": { "file": "examples/if_else.nts", "start": 48, "end": 51 },
+  "span": { "file": "examples/if_else.x", "start": 48, "end": 51 },
   "suggestion": "Use an explicit comparison, for example: age != 0"
 }
 ```

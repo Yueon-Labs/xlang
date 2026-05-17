@@ -1,4 +1,4 @@
-# NTS AST v0.1 Draft
+# X Language AST v0.1 Draft
 
 The parser should produce a simple, stable AST that is easy for type checking and JSON diagnostics.
 
@@ -43,7 +43,7 @@ type IfStmt = {
 
 Example source:
 
-```nts
+```x
 if age >= 18 {
     return 1
 } else {

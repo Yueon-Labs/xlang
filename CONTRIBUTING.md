@@ -1,6 +1,6 @@
-# Contributing to NTS
+# Contributing to X Language
 
-NTS is currently in the language-design phase. Contributions are most useful when they improve clarity and reduce ambiguity.
+X Language is currently in the language-design phase. Contributions are most useful when they improve clarity and reduce ambiguity.
 
 ## Good first contributions
 

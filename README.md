@@ -1,15 +1,15 @@
-# NTS
+# X Language
 
-**NTS** is an experimental AI-first, high-performance, TypeScript-like systems language.
+**X Language** is an experimental AI-first, high-performance, TypeScript-like systems language.
 
 The goal is simple:
 
 > Keep the readable parts of TypeScript, remove the unsafe/dynamic parts, and compile to fast native/Wasm targets.
 
-NTS is currently in the **v0.1 language-design phase**. The first prototype target is:
+X Language is currently in the **v0.1 language-design phase**. The first prototype target is:
 
 ```txt
-.nts source -> parser -> AST -> type checker -> C codegen -> executable
+.x source -> parser -> AST -> type checker -> C codegen -> executable
 ```
 
 ## Design goals
@@ -24,7 +24,7 @@ NTS is currently in the **v0.1 language-design phase**. The first prototype targ
 
 ## Example
 
-```nts
+```x
 module main
 
 fn main(): i32 {
@@ -86,7 +86,7 @@ macros
 
 ```txt
 docs/       Language specification and design notes
-examples/   Hand-written .nts examples used to validate syntax
+examples/   Hand-written .x examples used to validate syntax
 ```
 
 ## Current status
