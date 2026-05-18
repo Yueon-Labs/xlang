@@ -87,11 +87,61 @@ macros
 ```txt
 docs/       Language specification and design notes
 examples/   Hand-written .x examples used to validate syntax
+src/        Rust implementation of the prototype compiler
 ```
+
+Compiler source layout:
+
+```txt
+src/main.rs       Thin CLI process entrypoint
+src/lib.rs        Compiler library module root
+src/cli.rs        Command-line argument handling
+src/driver.rs     File-level compile flow: read -> parse -> C -> build
+src/lexer.rs      Source text -> tokens
+src/parser.rs     Tokens -> AST
+src/ast.rs        AST data structures
+src/codegen/c.rs  AST -> C backend
+src/error.rs      Shared error/result types
+```
+
+## Prototype quick start
+
+The repository includes a small Rust prototype compiler so the v0.1 flow can be
+tried end-to-end.
+
+```sh
+# Parse all examples
+make check
+
+# Print JSON AST for the simplest executable example
+cargo run --bin xlangc -- ast examples/if_else.x
+
+# Compile examples/if_else.x to C, build it, and run it
+make run-if
+```
+
+Expected `make run-if` output:
+
+```txt
+program exited with code 1
+```
+
+The exit code is `1` because `examples/if_else.x` returns `1` when `age >= 18`.
+
+Current prototype scope:
+
+- Lexer and parser cover the checked examples in `examples/`.
+- JSON AST output is available with `cargo run --bin xlangc -- ast <file>`.
+- C/native codegen currently supports the scalar subset used by
+  `examples/if_else.x`.
+- `Option<T>`, `Result<T, E>`, `for`, `match`, and collection lowering are parsed
+  but not lowered to C yet.
 
 ## Current status
 
-This repository is intentionally small. The immediate milestone is to lock the v0.1 spec and examples before implementing the parser.
+This repository is intentionally small. The immediate milestone is to lock the
+v0.1 spec and examples while growing the prototype compiler in small vertical
+slices.
 
 ## License
 
