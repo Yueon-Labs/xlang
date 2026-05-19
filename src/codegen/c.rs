@@ -1,10 +1,13 @@
 use crate::ast::*;
 use crate::error::{XError, XResult};
+use std::collections::{BTreeMap, HashMap};
 
 #[derive(Default)]
 pub struct CGen {
     lines: Vec<String>,
     indent: usize,
+    scopes: Vec<HashMap<String, TypeNode>>,
+    temp_counter: usize,
 }
 
 impl CGen {
@@ -17,6 +20,13 @@ impl CGen {
         self.emit("#include <stdbool.h>");
         self.emit("#include <stddef.h>");
         self.emit("");
+
+        for typedef in self.collect_runtime_typedefs(program)? {
+            self.emit(&typedef);
+        }
+        if !self.lines.last().is_some_and(|line| line.is_empty()) {
+            self.emit("");
+        }
 
         for item in &program.items {
             if let Item::StructDecl { .. } = item {
@@ -43,19 +53,154 @@ impl CGen {
             .push(format!("{}{}", "    ".repeat(self.indent), line));
     }
 
-    fn c_type(&self, ty: &TypeNode) -> XResult<&'static str> {
+    fn collect_runtime_typedefs(&self, program: &Program) -> XResult<Vec<String>> {
+        let mut typedefs = BTreeMap::new();
+        for item in &program.items {
+            match item {
+                Item::StructDecl { fields, .. } => {
+                    for field in fields {
+                        self.collect_type_typedefs(&field.ty, &mut typedefs)?;
+                    }
+                }
+                Item::TypeAliasDecl { ty, .. } => {
+                    self.collect_type_typedefs(ty, &mut typedefs)?;
+                }
+                Item::FnDecl {
+                    params,
+                    return_type,
+                    body,
+                    ..
+                } => {
+                    self.collect_type_typedefs(return_type, &mut typedefs)?;
+                    for param in params {
+                        self.collect_type_typedefs(&param.ty, &mut typedefs)?;
+                    }
+                    self.collect_block_typedefs(body, &mut typedefs)?;
+                }
+            }
+        }
+        Ok(typedefs.into_values().collect())
+    }
+
+    fn collect_block_typedefs(
+        &self,
+        block: &Block,
+        typedefs: &mut BTreeMap<String, String>,
+    ) -> XResult<()> {
+        for stmt in &block.statements {
+            match stmt {
+                Stmt::LetStmt { ty, .. } => self.collect_type_typedefs(ty, typedefs)?,
+                Stmt::IfStmt {
+                    then_block,
+                    else_branch,
+                    ..
+                } => {
+                    self.collect_block_typedefs(then_block, typedefs)?;
+                    match else_branch {
+                        Some(ElseBranch::Block(block)) => {
+                            self.collect_block_typedefs(block, typedefs)?;
+                        }
+                        Some(ElseBranch::IfStmt(stmt)) => {
+                            self.collect_stmt_typedefs(stmt, typedefs)?;
+                        }
+                        None => {}
+                    }
+                }
+                Stmt::ForStmt { body, .. } | Stmt::WhileStmt { body, .. } => {
+                    self.collect_block_typedefs(body, typedefs)?;
+                }
+                Stmt::MatchStmt { arms, .. } => {
+                    for arm in arms {
+                        self.collect_block_typedefs(&arm.body, typedefs)?;
+                    }
+                }
+                Stmt::ReturnStmt { .. }
+                | Stmt::BreakStmt
+                | Stmt::ContinueStmt
+                | Stmt::ExprStmt { .. } => {}
+            }
+        }
+        Ok(())
+    }
+
+    fn collect_stmt_typedefs(
+        &self,
+        stmt: &Stmt,
+        typedefs: &mut BTreeMap<String, String>,
+    ) -> XResult<()> {
+        self.collect_block_typedefs(
+            &Block {
+                kind: "Block",
+                statements: vec![stmt.clone()],
+            },
+            typedefs,
+        )
+    }
+
+    fn collect_type_typedefs(
+        &self,
+        ty: &TypeNode,
+        typedefs: &mut BTreeMap<String, String>,
+    ) -> XResult<()> {
+        let TypeNode::TypeExpr { name, args } = ty else {
+            return Ok(());
+        };
+        for arg in args {
+            self.collect_type_typedefs(arg, typedefs)?;
+        }
+        if name == "Slice" {
+            if args.len() != 1 {
+                return Err(XError::Codegen(format!(
+                    "Slice expects exactly one type argument, got {}",
+                    args.len()
+                )));
+            }
+            let elem_ty = &args[0];
+            let alias = self.c_type(ty)?;
+            let elem_c_type = self.c_type(elem_ty)?;
+            typedefs.entry(alias.clone()).or_insert_with(|| {
+                format!("typedef struct {{\n    {elem_c_type} *data;\n    size_t len;\n}} {alias};")
+            });
+        }
+        if name == "Array" {
+            if args.len() != 2 {
+                return Err(XError::Codegen(format!(
+                    "Array expects exactly two type arguments, got {}",
+                    args.len()
+                )));
+            }
+            let elem_ty = &args[0];
+            let len = self.const_type_arg_value(&args[1], "Array length")?;
+            let alias = self.c_type(ty)?;
+            let elem_c_type = self.c_type(elem_ty)?;
+            typedefs.entry(alias.clone()).or_insert_with(|| {
+                format!("typedef struct {{\n    {elem_c_type} data[{len}];\n}} {alias};")
+            });
+        }
+        Ok(())
+    }
+
+    fn c_type(&self, ty: &TypeNode) -> XResult<String> {
         match ty {
             TypeNode::TypeExpr { name, args } if args.is_empty() => match name.as_str() {
-                "i32" => Ok("int32_t"),
-                "i64" => Ok("int64_t"),
-                "f32" => Ok("float"),
-                "f64" => Ok("double"),
-                "bool" => Ok("bool"),
-                "String" | "Str" => Ok("const char *"),
+                "i32" => Ok("int32_t".to_string()),
+                "i64" => Ok("int64_t".to_string()),
+                "f32" => Ok("float".to_string()),
+                "f64" => Ok("double".to_string()),
+                "bool" => Ok("bool".to_string()),
+                "String" | "Str" => Ok("const char *".to_string()),
                 other => Err(XError::Codegen(format!(
                     "C backend does not support type yet: {other}"
                 ))),
             },
+            TypeNode::TypeExpr { name, args } if name == "Slice" && args.len() == 1 => {
+                Ok(format!("Slice_{}", self.c_type_suffix(&args[0])?))
+            }
+            TypeNode::TypeExpr { name, args } if name == "Array" && args.len() == 2 => Ok(format!(
+                "Array_{}_{}",
+                self.c_type_suffix(&args[0])?,
+                self.const_type_arg_value(&args[1], "Array length")?
+            )),
             TypeNode::TypeExpr { name, .. } => Err(XError::Codegen(format!(
                 "C backend does not support generic type yet: {name}<...>"
             ))),
@@ -63,6 +208,64 @@ impl CGen {
                 "unexpected const type argument in C type position: {value}"
             ))),
         }
+    }
+
+    fn c_type_suffix(&self, ty: &TypeNode) -> XResult<String> {
+        match ty {
+            TypeNode::TypeExpr { name, args } if args.is_empty() => match name.as_str() {
+                "i32" | "i64" | "f32" | "f64" | "bool" | "String" | "Str" => Ok(name.clone()),
+                other => Err(XError::Codegen(format!(
+                    "C backend does not support {other} as a generated type suffix yet"
+                ))),
+            },
+            TypeNode::TypeExpr { name, args } if name == "Slice" && args.len() == 1 => {
+                Ok(format!("Slice_{}", self.c_type_suffix(&args[0])?))
+            }
+            TypeNode::TypeExpr { name, args } if name == "Array" && args.len() == 2 => Ok(format!(
+                "Array_{}_{}",
+                self.c_type_suffix(&args[0])?,
+                self.const_type_arg_value(&args[1], "Array length")?
+            )),
+            TypeNode::TypeExpr { name, .. } => Err(XError::Codegen(format!(
+                "C backend does not support {name}<...> as a generated type suffix yet"
+            ))),
+            TypeNode::ConstTypeArg { value } => Err(XError::Codegen(format!(
+                "unexpected const type argument in C type suffix: {value}"
+            ))),
+        }
+    }
+
+    fn const_type_arg_value<'a>(&self, ty: &'a TypeNode, label: &str) -> XResult<&'a str> {
+        match ty {
+            TypeNode::ConstTypeArg { value } => Ok(value),
+            TypeNode::TypeExpr { name, .. } => Err(XError::Codegen(format!(
+                "{label} must be a constant integer, got type {name}"
+            ))),
+        }
+    }
+
+    fn push_scope(&mut self) {
+        self.scopes.push(HashMap::new());
+    }
+
+    fn pop_scope(&mut self) {
+        self.scopes.pop();
+    }
+
+    fn declare_var(&mut self, name: &str, ty: TypeNode) {
+        if let Some(scope) = self.scopes.last_mut() {
+            scope.insert(name.to_string(), ty);
+        }
+    }
+
+    fn lookup_var(&self, name: &str) -> Option<&TypeNode> {
+        self.scopes.iter().rev().find_map(|scope| scope.get(name))
+    }
+
+    fn next_temp(&mut self, prefix: &str) -> String {
+        let id = self.temp_counter;
+        self.temp_counter += 1;
+        format!("__xlang_{prefix}{id}")
     }
 
     fn gen_struct(&mut self, item: &Item) -> XResult<()> {
@@ -101,9 +304,14 @@ impl CGen {
         };
         self.emit(&format!("{ret} {name}({params_text}) {{"));
         self.indent += 1;
+        self.push_scope();
+        for param in params {
+            self.declare_var(&param.name, param.ty.clone());
+        }
         for stmt in &body.statements {
             self.gen_stmt(stmt)?;
         }
+        self.pop_scope();
         self.indent -= 1;
         self.emit("}");
         Ok(())
@@ -120,6 +328,7 @@ impl CGen {
                     name,
                     self.gen_expr(value)?
                 ));
+                self.declare_var(name, ty.clone());
             }
             Stmt::ReturnStmt { value } => match value {
                 Some(expr) => self.emit(&format!("return {};", self.gen_expr(expr)?)),
@@ -159,22 +368,73 @@ impl CGen {
             Stmt::WhileStmt { condition, body } => {
                 self.emit(&format!("while ({}) {{", self.gen_expr(condition)?));
                 self.indent += 1;
+                self.push_scope();
                 for inner in &body.statements {
                     self.gen_stmt(inner)?;
                 }
+                self.pop_scope();
                 self.indent -= 1;
                 self.emit("}");
             }
+            Stmt::ForStmt {
+                iterator,
+                iterable,
+                body,
+            } => self.gen_for_stmt(iterator, iterable, body)?,
             Stmt::ExprStmt { expr } => self.emit(&format!("{};", self.gen_expr(expr)?)),
             Stmt::BreakStmt => self.emit("break;"),
             Stmt::ContinueStmt => self.emit("continue;"),
-            Stmt::ForStmt { .. } | Stmt::MatchStmt { .. } => {
+            Stmt::MatchStmt { .. } => {
                 return Err(XError::Codegen(format!(
                     "C backend does not support statement yet: {:?}",
                     stmt_kind(stmt)
                 )));
             }
         }
+        Ok(())
+    }
+
+    fn gen_for_stmt(&mut self, iterator: &str, iterable: &Expr, body: &Block) -> XResult<()> {
+        let Expr::Identifier {
+            name: iterable_name,
+        } = iterable
+        else {
+            return Err(XError::Codegen(
+                "C backend only supports `for value in values` where values is an identifier"
+                    .to_string(),
+            ));
+        };
+
+        let Some(TypeNode::TypeExpr { name, args }) = self.lookup_var(iterable_name) else {
+            return Err(XError::Codegen(format!(
+                "unknown iterable {iterable_name:?} in for loop"
+            )));
+        };
+        if name != "Slice" || args.len() != 1 {
+            return Err(XError::Codegen(format!(
+                "C backend only supports for-in over Slice<T>, got {name}<...>"
+            )));
+        }
+        let elem_ty = args[0].clone();
+        let elem_c_type = self.c_type(&elem_ty)?;
+        let iter_c = self.gen_expr(iterable)?;
+        let index = self.next_temp("i");
+
+        self.emit(&format!(
+            "for (size_t {index} = 0; {index} < {iter_c}.len; {index}++) {{"
+        ));
+        self.indent += 1;
+        self.push_scope();
+        self.declare_var(iterator, elem_ty);
+        self.emit(&format!(
+            "{elem_c_type} {iterator} = {iter_c}.data[{index}];"
+        ));
+        for inner in &body.statements {
+            self.gen_stmt(inner)?;
+        }
+        self.pop_scope();
+        self.indent -= 1;
+        self.emit("}");
         Ok(())
     }
 

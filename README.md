@@ -118,6 +118,12 @@ cargo run --bin xlangc -- ast examples/if_else.x
 
 # Compile examples/if_else.x to C, build it, and run it
 make run-if
+
+# Generate and compile examples/loop.x as a C object file
+make c-loop
+
+# Generate and compile examples/array_type.x as a C object file
+make c-array-type
 ```
 
 Expected `make run-if` output:
@@ -134,7 +140,11 @@ Current prototype scope:
 - JSON AST output is available with `cargo run --bin xlangc -- ast <file>`.
 - C/native codegen currently supports the scalar subset used by
   `examples/if_else.x`.
-- `Option<T>`, `Result<T, E>`, `for`, `match`, and collection lowering are parsed
+- C codegen supports `Slice<i32>` parameters and `for value in values` lowering
+  for the `examples/loop.x` shape.
+- C codegen supports fixed array type lowering such as `Array<i32, 4>` to a C
+  struct with inline storage.
+- `Option<T>`, `Result<T, E>`, `match`, and full collection lowering are parsed
   but not lowered to C yet.
 
 ## Current status

@@ -30,5 +30,11 @@ jobs:
       - name: Check X examples
         run: make check
 
+      - name: Generate loop example C
+        run: make c-loop
+
+      - name: Generate array type example C
+        run: make c-array-type
+
       - name: Run if_else example
         run: make run-if
