@@ -7,11 +7,14 @@ use crate::codegen::c::CGen;
 use crate::error::{XError, XResult};
 use crate::lexer::Lexer;
 use crate::parser::Parser;
+use crate::typecheck::check_program;
 
 pub fn parse_file(path: &Path) -> XResult<Program> {
     let source = fs::read_to_string(path)?;
     let tokens = Lexer::new(&source).tokenize()?;
-    Parser::new(tokens, path.display().to_string()).parse()
+    let program = Parser::new(tokens, path.display().to_string()).parse()?;
+    check_program(&program)?;
+    Ok(program)
 }
 
 pub fn write_c(source: &Path, output: Option<PathBuf>) -> XResult<PathBuf> {

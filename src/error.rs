@@ -2,6 +2,7 @@
 pub enum XError {
     Lex(String),
     Parse(String),
+    Type(String),
     Codegen(String),
     Io(std::io::Error),
     Json(serde_json::Error),
@@ -12,6 +13,7 @@ impl std::fmt::Display for XError {
         match self {
             XError::Lex(msg) => write!(f, "lexer error: {msg}"),
             XError::Parse(msg) => write!(f, "parse error: {msg}"),
+            XError::Type(msg) => write!(f, "type error: {msg}"),
             XError::Codegen(msg) => write!(f, "codegen error: {msg}"),
             XError::Io(err) => write!(f, "io error: {err}"),
             XError::Json(err) => write!(f, "json error: {err}"),

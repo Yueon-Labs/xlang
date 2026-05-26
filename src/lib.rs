@@ -3,6 +3,7 @@ pub mod cli;
 pub mod codegen;
 pub mod driver;
 pub mod error;
+pub mod typecheck;
 
 mod lexer;
 mod parser;
