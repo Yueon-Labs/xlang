@@ -119,6 +119,9 @@ cargo run --bin xlangc -- ast examples/if_else.x
 # Compile examples/if_else.x to C, build it, and run it
 make run-if
 
+# Build and run with an isolated temp build directory, timeout, and JSON result
+cargo run --bin xlangc -- run-safe examples/if_else.x --timeout-ms 2000
+
 # Generate and compile examples/loop.x as a C object file
 make c-loop
 
@@ -149,6 +152,9 @@ Current prototype scope:
   struct with inline storage.
 - Array literals are supported in typed `Array<T, N>` `let` initializers, for
   example `let values: Array<i32, 4> = [1, 2, 3, 4]`.
+- `run-safe` builds in an isolated temporary directory, runs with a timeout, and
+  emits JSON containing status, exit code, stdout, stderr, duration, and
+  truncation flags.
 - `Option<T>`, `Result<T, E>`, `match`, and full collection lowering are parsed
   but not lowered to C yet.
 

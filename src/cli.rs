@@ -3,7 +3,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use crate::driver::{build_exe, parse_file, write_c};
+use crate::driver::{RunSafeOptions, build_exe, parse_file, run_safe, write_c};
 use crate::error::{XError, XResult};
 
 pub fn run_cli() -> XResult<()> {
@@ -65,6 +65,15 @@ pub fn run_cli() -> XResult<()> {
             );
             Ok(())
         }
+        "run-safe" => {
+            let (source, options) = parse_run_safe_args(
+                &args,
+                "xlangc run-safe <file> [--timeout-ms ms] [--output-limit-bytes bytes]",
+            )?;
+            let result = run_safe(Path::new(&source), options)?;
+            println!("{}", serde_json::to_string_pretty(&result)?);
+            Ok(())
+        }
         other => Err(XError::Parse(format!("unknown command {other:?}"))),
     }
 }
@@ -77,7 +86,8 @@ fn print_help() {
            xlangc ast <file>              Print JSON AST\n\
            xlangc c <file> [-o out.c]     Generate C for supported subset\n\
            xlangc build <file> [-o out]   Build native executable\n\
-           xlangc run <file> [-o out]     Build and run"
+           xlangc run <file> [-o out]     Build and run\n\
+           xlangc run-safe <file>         Build and run with timeout, temp output, and JSON result"
     );
 }
 
@@ -107,4 +117,49 @@ fn parse_source_o(args: &[String], usage: &str) -> XResult<(String, Option<Strin
         }
     }
     Ok((source, output))
+}
+
+fn parse_run_safe_args(args: &[String], usage: &str) -> XResult<(String, RunSafeOptions)> {
+    if args.is_empty() {
+        return Err(XError::Parse(format!("usage: {usage}")));
+    }
+    let source = args[0].clone();
+    let mut options = RunSafeOptions::default();
+    let mut i = 1;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--timeout-ms" => {
+                if i + 1 >= args.len() {
+                    return Err(XError::Parse(format!("usage: {usage}")));
+                }
+                options.timeout_ms = parse_positive_u64(&args[i + 1], "--timeout-ms")?;
+                i += 2;
+            }
+            "--output-limit-bytes" => {
+                if i + 1 >= args.len() {
+                    return Err(XError::Parse(format!("usage: {usage}")));
+                }
+                options.output_limit_bytes = parse_usize(&args[i + 1], "--output-limit-bytes")?;
+                i += 2;
+            }
+            _ => return Err(XError::Parse(format!("usage: {usage}"))),
+        }
+    }
+    Ok((source, options))
+}
+
+fn parse_positive_u64(value: &str, flag: &str) -> XResult<u64> {
+    let parsed = value
+        .parse::<u64>()
+        .map_err(|_| XError::Parse(format!("{flag} expects a positive integer")))?;
+    if parsed == 0 {
+        return Err(XError::Parse(format!("{flag} expects a positive integer")));
+    }
+    Ok(parsed)
+}
+
+fn parse_usize(value: &str, flag: &str) -> XResult<usize> {
+    value
+        .parse::<usize>()
+        .map_err(|_| XError::Parse(format!("{flag} expects a non-negative integer")))
 }
