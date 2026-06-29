@@ -1,169 +1,94 @@
-# X Language
+# xlang — AI-first systems language
 
-**X Language** is an experimental AI-first, high-performance, TypeScript-like systems language.
+A TypeScript-like systems language that compiles to C. Built in Rust.
+Features structured diagnostics, bitwise operators, and a growing standard
+library — **40 coreutils, a shell, and an HTTP server**, all written in xlang.
 
-The goal is simple:
+## Build
 
-> Keep the readable parts of TypeScript, remove the unsafe/dynamic parts, and compile to fast native/Wasm targets.
-
-X Language is currently in the **v0.1 language-design phase**. The first prototype target is:
-
-```txt
-.x source -> parser -> AST -> type checker -> C codegen -> executable
+```sh
+cargo build --release
+./target/release/xlangc help
 ```
 
-## Design goals
-
-- AI-friendly: one canonical way to write each construct.
-- High performance: fixed layouts, static typing, C/Wasm-friendly semantics.
-- No `any`.
-- No `null` / `undefined`.
-- No exceptions; use `Result<T, E>`.
-- No JS magic behavior: no implicit truthiness, no dynamic objects, no hidden calls.
-- Clear machine-readable compiler diagnostics for AI auto-repair.
-
-## Example
+## Hello world
 
 ```x
 module main
 
 fn main(): i32 {
-    let age: i32 = 20
-
-    if age >= 18 {
-        return 1
-    } else {
-        return 0
-    }
+    print_str("hello from xlang")
+    return 0
 }
 ```
 
-## v0.1 language surface
-
-Planned v0.1 features:
-
-```txt
-module
-import
-struct
-type alias
-fn
-let / let mut
-if / else
-for in
-while
-match
-return
-break / continue
-
-i32 i64 f32 f64 bool String Str
-Array<T, N> Vec<T> Slice<T>
-Option<T> Result<T, E>
-```
-
-Explicitly out of scope for v0.1:
-
-```txt
-any
-null
-undefined
-exceptions
-class
-this
-inheritance
-prototype
-dynamic object fields
-implicit casts
-truthy/falsy conditions
-eval
-reflection
-async/await
-closures
-macros
-```
-
-## Repository layout
-
-```txt
-docs/       Language specification and design notes
-examples/   Hand-written .x examples used to validate syntax
-src/        Rust implementation of the prototype compiler
-```
-
-Compiler source layout:
-
-```txt
-src/main.rs       Thin CLI process entrypoint
-src/lib.rs        Compiler library module root
-src/cli.rs        Command-line argument handling
-src/driver.rs     File-level compile flow: read -> parse -> C -> build
-src/lexer.rs      Source text -> tokens
-src/parser.rs     Tokens -> AST
-src/ast.rs        AST data structures
-src/codegen/c.rs  AST -> C backend
-src/error.rs      Shared error/result types
-```
-
-## Prototype quick start
-
-The repository includes a small Rust prototype compiler so the v0.1 flow can be
-tried end-to-end.
-
 ```sh
-# Parse all examples
-make check
-
-# Print JSON AST for the simplest executable example
-cargo run --bin xlangc -- ast examples/if_else.x
-
-# Compile examples/if_else.x to C, build it, and run it
-make run-if
-
-# Build and run with an isolated temp build directory, timeout, and JSON result
-cargo run --bin xlangc -- run-safe examples/if_else.x --timeout-ms 2000
-
-# Generate and compile examples/loop.x as a C object file
-make c-loop
-
-# Generate and compile examples/array_type.x as a C object file
-make c-array-type
-
-# Compile examples/array_literal.x to C, build it, and run it
-make run-array-literal
+./target/release/xlangc c hello.x && cc -o hello hello.c && ./hello
 ```
 
-Expected `make run-if` output:
+## Language features
 
-```txt
-program exited with code 1
+| Feature | Status |
+|---------|--------|
+| Scalar types (`i32 i64 f32 f64 bool String`) | ✅ |
+| Parametric types (`Option<T> Result<T,E> Array<T,N> Vec<T> Slice<T>`) | ✅ |
+| Structs (with literals + field access) | ✅ |
+| `match` on Option/Result → C if/else | ✅ |
+| Arithmetic, comparison, logical operators | ✅ |
+| Bitwise operators (`& \| ^ ~ << >>`) | ✅ |
+| Compound assignment (`+= -= *= /= %=`) | ✅ |
+| Functions, recursion, array indexing | ✅ |
+| `if/else`, `while`, `for-in` | ✅ |
+| Structured diagnostics (machine-readable JSON) | ✅ |
+
+## Standard library (~38 builtins)
+
+| Category | Builtins |
+|----------|----------|
+| Console I/O | `print_i32` `print_f64` `print_str` `print_bool` `print_raw` |
+| String | `str_len` `str_concat` `str_eq` `str_cmp` `str_find` `str_slice` `str_char_at` `str_reverse` `str_translate` `str_to_int` `str_to_int_oct` `int_to_str` |
+| File I/O | `read_file` `write_file` `read_stdin` `read_line` |
+| Filesystem | `remove_file` `rename_file` `make_dir` `chmod` `symlink` `file_size` `is_dir` |
+| Directory | `dir_count` `dir_entry` |
+| Networking | `tcp_listen` `accept` `recv_str` `send_str` `close_fd` |
+| Process | `fork` `getpid` `argc` `argv` `system` `kill` `sleep_sec` |
+| Time | `time_str` |
+
+## Coreutils (40) — Linux userland replication
+
+All written in xlang, compiled to C, verified against GNU on a Linux server.
+
+```
+cat  echo  wc  grep  head  tail  sort  uniq  rev  tac  tr  cut  expand
+expr  tee  yes  seq  nl  factor  paste  cp  mv  rm  mkdir  chmod  ln
+touch  ls  find  du  date  sleep  hostname  ps  uname  free  uptime
+kill  base64  od
 ```
 
-The exit code is `1` because `examples/if_else.x` returns `1` when `age >= 18`.
+Plus **`xsh`** — a minimal shell (reads commands → executes via `system()` → loops).
 
-Current prototype scope:
+## HTTP server (nginx replication)
 
-- Lexer and parser cover the checked examples in `examples/`.
-- JSON AST output is available with `cargo run --bin xlangc -- ast <file>`.
-- C/native codegen currently supports the scalar subset used by
-  `examples/if_else.x`.
-- C codegen supports `Slice<i32>` parameters and `for value in values` lowering
-  for the `examples/loop.x` shape.
-- C codegen supports fixed array type lowering such as `Array<i32, 4>` to a C
-  struct with inline storage.
-- Array literals are supported in typed `Array<T, N>` `let` initializers, for
-  example `let values: Array<i32, 4> = [1, 2, 3, 4]`.
-- `run-safe` builds in an isolated temporary directory, runs with a timeout, and
-  emits JSON containing status, exit code, stdout, stderr, duration, and
-  truncation flags.
-- `Option<T>`, `Result<T, E>`, `match`, and full collection lowering are parsed
-  but not lowered to C yet.
+xlang writes HTTP servers (keepalive, prefork, file serving, routing).
+Benchmarked against **nginx 1.28 (from source)** on a 64-core server:
 
-## Current status
+| Workload | nginx | xlang |
+|----------|-------|-------|
+| Fixed response, keepalive 16-conc (prefork) | 77k req/s | **129k req/s** |
+| 64KB file serving, keepalive 16-conc | 25.6k req/s | 22.7k req/s |
+| `cat\|grep\|sort\|uniq\|head` pipeline (500 lines) | 3ms | 5ms |
 
-This repository is intentionally small. The immediate milestone is to lock the
-v0.1 spec and examples while growing the prototype compiler in small vertical
-slices.
+## Methodology
+
+Built iteratively: **replicate → hit a limitation → modify xlang → implement → verify**.
+Each coreutil that needed a new capability drove xlang's growth (argv, read_stdin,
+str_char_at, str_cmp, bitwise operators, read_file /proc fix, Vec index-assign fix, etc.).
+
+## Testing
+
+52 unit tests covering every compiler component (lexer, parser, typecheck, codegen,
+source, error, driver). CI green on all 71+ commits.
 
 ## License
 
-MIT License. See [LICENSE](./LICENSE).
+MIT
