@@ -934,6 +934,7 @@ impl CGen {
             "#include <arpa/inet.h>",
             "#include <dirent.h>",
             "#include <sys/stat.h>",
+            "#include <signal.h>",
             "int32_t __xlang_tcp_listen(int32_t port) {",
             "    int fd = socket(AF_INET, SOCK_STREAM, 0);",
             "    int opt = 1;",
@@ -1064,6 +1065,13 @@ impl CGen {
             "is_dir" => format!("__xlang_is_dir({a})"),
             "file_size" => format!("__xlang_file_size({a})"),
             "make_dir" => format!("mkdir({a}, 0755)"),
+            "kill" => {
+                let Some(second) = args.get(1) else {
+                    return Ok(None);
+                };
+                let b = self.gen_expr(second)?;
+                format!("kill(({a}), ({b}))")
+            }
             "str_to_int_oct" => format!("(int32_t)strtol({a}, 0, 8)"),
             "chmod" => {
                 let Some(second) = args.get(1) else {
