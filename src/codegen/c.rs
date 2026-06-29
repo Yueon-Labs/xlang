@@ -838,6 +838,20 @@ impl CGen {
             "    if (!f) return;",
             "    fwrite(content, 1, strlen(content), f); fclose(f);",
             "}",
+            "int32_t __xlang_str_find(const char* s, const char* sub) {",
+            "    const char* p = strstr(s, sub);",
+            "    return p ? (int32_t)(p - s) : -1;",
+            "}",
+            "char* __xlang_str_slice(const char* s, int32_t start, int32_t end) {",
+            "    int32_t n = (int32_t)strlen(s);",
+            "    if (start < 0) start = 0;",
+            "    if (end > n) end = n;",
+            "    if (end < start) end = start;",
+            "    int32_t len = end - start;",
+            "    char* out = (char*)malloc(len + 1);",
+            "    memcpy(out, s + start, len); out[len] = 0;",
+            "    return out;",
+            "}",
             "",
         ];
         for line in lines {
@@ -906,6 +920,28 @@ impl CGen {
                 };
                 let b = self.gen_expr(second)?;
                 format!("__xlang_str_concat({a}, {b})")
+            }
+            "str_eq" => {
+                let Some(second) = args.get(1) else {
+                    return Ok(None);
+                };
+                let b = self.gen_expr(second)?;
+                format!("(strcmp({a}, {b}) == 0)")
+            }
+            "str_find" => {
+                let Some(second) = args.get(1) else {
+                    return Ok(None);
+                };
+                let b = self.gen_expr(second)?;
+                format!("__xlang_str_find({a}, {b})")
+            }
+            "str_slice" => {
+                if args.len() < 3 {
+                    return Ok(None);
+                }
+                let b = self.gen_expr(&args[1])?;
+                let c = self.gen_expr(&args[2])?;
+                format!("__xlang_str_slice({a}, {b}, {c})")
             }
             "read_file" => format!("__xlang_read_file({a})"),
             "write_file" => {
@@ -1154,5 +1190,22 @@ mod tests {
             c.contains("int32_t helper(int32_t x);"),
             "no prototype: {c}"
         );
+    }
+
+    #[test]
+    fn emits_str_eq_as_strcmp() {
+        let c = gen_c(
+            "module main\nfn f(a: String, b: String): bool { return str_eq(a, b) }\nfn main(): i32 { return 0 }",
+        );
+        assert!(c.contains("strcmp("), "no strcmp for str_eq: {c}");
+    }
+
+    #[test]
+    fn emits_str_find_and_slice_helpers() {
+        let c = gen_c(
+            "module main\nfn main(): i32 { let s: String = \"hi\" let i: i32 = str_find(s, \"h\") let t: String = str_slice(s, 0, 1) return 0 }",
+        );
+        assert!(c.contains("__xlang_str_find("), "no str_find: {c}");
+        assert!(c.contains("__xlang_str_slice("), "no str_slice: {c}");
     }
 }
