@@ -71,3 +71,6 @@ jobs:
 
       - name: Run Vec demo (dynamic array: push + iterate)
         run: make run-vec-demo
+
+      - name: Run file I/O demo (write + read back)
+        run: make run-file-io

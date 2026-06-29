@@ -790,6 +790,19 @@ impl CGen {
             "    snprintf(buf, 16, \"%d\", n);",
             "    return buf;",
             "}",
+            "char* __xlang_read_file(const char* path) {",
+            "    FILE* f = fopen(path, \"rb\");",
+            "    if (!f) { char* e = (char*)malloc(1); e[0] = 0; return e; }",
+            "    fseek(f, 0, SEEK_END); long sz = ftell(f); fseek(f, 0, SEEK_SET);",
+            "    char* buf = (char*)malloc(sz + 1);",
+            "    fread(buf, 1, sz, f); buf[sz] = 0; fclose(f);",
+            "    return buf;",
+            "}",
+            "void __xlang_write_file(const char* path, const char* content) {",
+            "    FILE* f = fopen(path, \"wb\");",
+            "    if (!f) return;",
+            "    fwrite(content, 1, strlen(content), f); fclose(f);",
+            "}",
             "",
         ];
         for line in lines {
@@ -820,6 +833,14 @@ impl CGen {
                 };
                 let b = self.gen_expr(second)?;
                 format!("__xlang_str_concat({a}, {b})")
+            }
+            "read_file" => format!("__xlang_read_file({a})"),
+            "write_file" => {
+                let Some(second) = args.get(1) else {
+                    return Ok(None);
+                };
+                let b = self.gen_expr(second)?;
+                format!("__xlang_write_file({a}, {b})")
             }
             _ => return Ok(None),
         };
