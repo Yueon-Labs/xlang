@@ -997,6 +997,14 @@ impl CGen {
                 let b = self.gen_expr(second)?;
                 format!("__xlang_dir_entry({a}, {b})")
             }
+            "str_cmp" => {
+                let Some(second) = args.get(1) else {
+                    return Ok(None);
+                };
+                let b = self.gen_expr(second)?;
+                format!("(int32_t)strcmp({a}, {b})")
+            }
+            "vec_len" => format!("((int32_t)({a}).len)"),
             "read_file" => format!("__xlang_read_file({a})"),
             "write_file" => {
                 let Some(second) = args.get(1) else {
