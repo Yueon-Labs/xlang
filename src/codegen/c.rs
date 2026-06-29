@@ -34,6 +34,7 @@ impl CGen {
         self.emit("#include <string.h>");
         self.emit("#include <stdlib.h>");
         self.emit("#include <time.h>");
+        self.emit("#include <locale.h>");
         self.emit("");
         self.emit_runtime_preamble();
         self.emit_networking_preamble();
@@ -901,6 +902,7 @@ impl CGen {
             "    return buf;",
             "}",
             "char* __xlang_time_str() {",
+            "    setlocale(LC_TIME, \"\");",
             "    time_t t = time(NULL);",
             "    struct tm* tm = localtime(&t);",
             "    char* s = (char*)malloc(64);",
