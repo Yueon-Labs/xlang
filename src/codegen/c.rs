@@ -50,6 +50,15 @@ impl CGen {
             }
         }
 
+        // Forward declarations so functions can reference each other in any
+        // source order (a prerequisite for multi-file module merging too).
+        for item in &program.items {
+            if let Item::FnDecl { .. } = &item.node {
+                self.gen_fn_prototype(&item.node)?;
+            }
+        }
+        self.emit("");
+
         for item in &program.items {
             match &item.node {
                 Item::FnDecl { .. } => {
@@ -377,6 +386,31 @@ impl CGen {
         }
         self.indent -= 1;
         self.emit(&format!("}} {name};"));
+        Ok(())
+    }
+
+    /// Emit a forward declaration so functions may appear in any source order.
+    fn gen_fn_prototype(&mut self, item: &Item) -> XResult<()> {
+        let Item::FnDecl {
+            name,
+            params,
+            return_type,
+            ..
+        } = item
+        else {
+            unreachable!();
+        };
+        let ret = self.c_type(return_type)?;
+        let params_text = if params.is_empty() {
+            "void".to_string()
+        } else {
+            let mut parts = Vec::new();
+            for param in params {
+                parts.push(format!("{} {}", self.c_type(&param.ty)?, param.name));
+            }
+            parts.join(", ")
+        };
+        self.emit(&format!("{ret} {name}({params_text});"));
         Ok(())
     }
 

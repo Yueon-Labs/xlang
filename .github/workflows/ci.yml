@@ -74,3 +74,6 @@ jobs:
 
       - name: Run file I/O demo (write + read back)
         run: make run-file-io
+
+      - name: Run forward-reference demo (out-of-order functions)
+        run: make run-forward-ref
