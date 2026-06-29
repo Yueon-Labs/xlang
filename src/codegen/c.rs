@@ -978,6 +978,11 @@ impl CGen {
             "    if (stat(path, &st) != 0) return 0;",
             "    return S_ISDIR(st.st_mode) ? 1 : 0;",
             "}",
+            "int32_t __xlang_file_size(const char* path) {",
+            "    struct stat st;",
+            "    if (stat(path, &st) != 0) return 0;",
+            "    return (int32_t)st.st_size;",
+            "}",
             "#endif",
             "",
         ];
@@ -1052,6 +1057,7 @@ impl CGen {
             }
             "dir_count" => format!("__xlang_dir_count({a})"),
             "is_dir" => format!("__xlang_is_dir({a})"),
+            "file_size" => format!("__xlang_file_size({a})"),
             "dir_entry" => {
                 let Some(second) = args.get(1) else {
                     return Ok(None);
