@@ -1019,4 +1019,210 @@ fn main(): i32 {
             diags.items
         );
     }
+
+    // ---- Phase 2/3 feature coverage ----
+
+    fn assert_clean(diags: &Diagnostics) {
+        assert!(
+            diags.is_empty(),
+            "expected no diagnostics, got: {:?}",
+            diags.items
+        );
+    }
+
+    #[test]
+    fn struct_literal_and_field_access_typecheck() {
+        let diags = check_source(
+            r#"
+module main
+
+struct Point { x: i32 y: i32 }
+
+fn main(): i32 {
+    let p: Point = Point { x: 1, y: 2 }
+    let sum: i32 = p.x + p.y
+    return sum
+}
+"#,
+        );
+        assert_clean(&diags);
+    }
+
+    #[test]
+    fn rejects_struct_literal_wrong_field_type() {
+        let diags = check_source(
+            r#"
+module main
+
+struct Point { x: i32 y: i32 }
+
+fn main(): i32 {
+    let p: Point = Point { x: true, y: 2 }
+    return 0
+}
+"#,
+        );
+        assert!(first_message(&diags).contains("struct field \"x\" expects i32, got bool"));
+    }
+
+    #[test]
+    fn rejects_struct_literal_unknown_field() {
+        let diags = check_source(
+            r#"
+module main
+
+struct Point { x: i32 y: i32 }
+
+fn main(): i32 {
+    let p: Point = Point { x: 1, y: 2, z: 3 }
+    return 0
+}
+"#,
+        );
+        assert!(first_message(&diags).contains("struct \"Point\" has no field \"z\""));
+    }
+
+    #[test]
+    fn rejects_assignment_to_immutable_struct_field() {
+        let diags = check_source(
+            r#"
+module main
+
+struct Point { x: i32 }
+
+fn main(): i32 {
+    let p: Point = Point { x: 1 }
+    p.x = 5
+    return 0
+}
+"#,
+        );
+        assert!(first_message(&diags).contains("cannot assign to immutable variable \"p\""));
+    }
+
+    #[test]
+    fn for_in_over_array_typechecks() {
+        let diags = check_source(
+            r#"
+module main
+
+fn main(): i32 {
+    let nums: Array<i32, 3> = [1, 2, 3]
+    let mut sum: i32 = 0
+    for n in nums {
+        sum += n
+    }
+    return sum
+}
+"#,
+        );
+        assert_clean(&diags);
+    }
+
+    #[test]
+    fn for_in_over_vec_typechecks() {
+        let diags = check_source(
+            r#"
+module main
+
+fn main(): i32 {
+    let v: Vec<i32> = vec_new()
+    let mut sum: i32 = 0
+    for n in v {
+        sum += n
+    }
+    return sum
+}
+"#,
+        );
+        assert_clean(&diags);
+    }
+
+    #[test]
+    fn rejects_for_in_over_non_collection() {
+        let diags = check_source(
+            r#"
+module main
+
+fn main(): i32 {
+    let x: i32 = 5
+    for n in x {
+        return n
+    }
+    return 0
+}
+"#,
+        );
+        assert!(first_message(&diags).contains("for-in expects Slice<T> or Array<T, N>, got i32"));
+    }
+
+    #[test]
+    fn rejects_indexing_a_non_array() {
+        let diags = check_source(
+            r#"
+module main
+
+fn main(): i32 {
+    let x: i32 = 5
+    let y: i32 = x[0]
+    return y
+}
+"#,
+        );
+        assert!(first_message(&diags).contains("cannot index into i32"));
+    }
+
+    #[test]
+    fn rejects_non_integer_array_index() {
+        let diags = check_source(
+            r#"
+module main
+
+fn main(): i32 {
+    let nums: Array<i32, 3> = [1, 2, 3]
+    let y: i32 = nums[true]
+    return y
+}
+"#,
+        );
+        assert!(first_message(&diags).contains("array index must be an integer, got bool"));
+    }
+
+    #[test]
+    fn rejects_compound_assignment_with_wrong_type() {
+        // `sum += true` desugars to `sum = sum + true`; the + on a bool errors.
+        let diags = check_source(
+            r#"
+module main
+
+fn main(): i32 {
+    let mut sum: i32 = 0
+    sum += true
+    return sum
+}
+"#,
+        );
+        assert!(first_message(&diags).contains("right operand of + must be numeric, got bool"));
+    }
+
+    #[test]
+    fn match_on_option_typechecks() {
+        let diags = check_source(
+            r#"
+module main
+
+fn f(o: Option<i32>): i32 {
+    match o {
+        Some(v) => { return v }
+        None => { return 0 }
+    }
+}
+
+fn main(): i32 {
+    return 0
+}
+"#,
+        );
+        assert_clean(&diags);
+    }
 }
