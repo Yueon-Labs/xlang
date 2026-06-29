@@ -1004,6 +1004,10 @@ impl CGen {
             "    buf[n] = 0;",
             "    return buf;",
             "}",
+            "char* __xlang_realpath(const char* path) {",
+            "    char* resolved = realpath(path, NULL);",
+            "    return resolved ? resolved : \"\";",
+            "}",
             "#endif",
             "",
         ];
@@ -1092,6 +1096,7 @@ impl CGen {
             "random_int" => format!("(int32_t)(rand() % ({a}))"),
             "getenv" => format!("(getenv({a}) ? getenv({a}) : \"\")"),
             "readlink" => format!("__xlang_readlink({a})"),
+            "realpath" => format!("__xlang_realpath({a})"),
             "str_to_int_oct" => format!("(int32_t)strtol({a}, 0, 8)"),
             "chmod" => {
                 let Some(second) = args.get(1) else {
