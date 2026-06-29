@@ -993,6 +993,10 @@ impl CGen {
             "    struct stat st;",
             "    return stat(path, &st) == 0 ? 1 : 0;",
             "}",
+            "char* __xlang_getcwd() {",
+            "    char* buf = (char*)malloc(4096);",
+            "    return getcwd(buf, 4096);",
+            "}",
             "#endif",
             "",
         ];
@@ -1069,6 +1073,7 @@ impl CGen {
             "is_dir" => format!("__xlang_is_dir({a})"),
             "file_size" => format!("__xlang_file_size({a})"),
             "file_exists" => format!("__xlang_file_exists({a})"),
+            "chdir" => format!("chdir(({a}))"),
             "make_dir" => format!("mkdir({a}, 0755)"),
             "kill" => {
                 let Some(second) = args.get(1) else {
@@ -1194,6 +1199,7 @@ impl CGen {
             "read_line" => "__xlang_read_line()".to_string(),
             "time_str" => "__xlang_time_str()".to_string(),
             "random_seed" => "srand((unsigned)time(NULL))".to_string(),
+            "getcwd" => "__xlang_getcwd()".to_string(),
             _ => return Ok(None),
         }))
     }
