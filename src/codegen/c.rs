@@ -1023,6 +1023,10 @@ impl CGen {
             "    }",
             "    return \"\";",
             "}",
+            "const char* __xlang_tty() {",
+            "    char* name = ttyname(0);",
+            "    return name ? name : \"\";",
+            "}",
             "#endif",
             "",
         ];
@@ -1247,6 +1251,7 @@ impl CGen {
             "random_seed" => "srand((unsigned)time(NULL))".to_string(),
             "getcwd" => "__xlang_getcwd()".to_string(),
             "env_count" => "__xlang_env_count()".to_string(),
+            "tty" => "__xlang_tty()".to_string(),
             _ => return Ok(None),
         }))
     }
