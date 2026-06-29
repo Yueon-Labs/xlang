@@ -592,25 +592,35 @@ impl CGen {
                 "unknown iterable {iterable_name:?} in for loop"
             )));
         };
-        if name != "Slice" || args.len() != 1 {
-            return Err(XError::Codegen(format!(
-                "C backend only supports for-in over Slice<T>, got {name}<...>"
-            )));
-        }
-        let elem_ty = args[0].clone();
-        let elem_c_type = self.c_type(&elem_ty)?;
         let iter_c = self.gen_expr(iterable)?;
+        // Loop bound + element source differ: Slice uses a runtime `.len`;
+        // Array<T, N> uses the compile-time N. Both store elements in `.data`.
+        let (elem_ty, bound, data) = match (name.as_str(), args.len()) {
+            ("Slice", 1) => (
+                args[0].clone(),
+                format!("{iter_c}.len"),
+                format!("{iter_c}.data"),
+            ),
+            ("Array", 2) => {
+                let n = self.const_type_arg_value(&args[1], "Array length")?;
+                (args[0].clone(), n.to_string(), format!("{iter_c}.data"))
+            }
+            _ => {
+                return Err(XError::Codegen(format!(
+                    "C backend only supports for-in over Slice<T> or Array<T, N>, got {name}<...>"
+                )));
+            }
+        };
+        let elem_c_type = self.c_type(&elem_ty)?;
         let index = self.next_temp("i");
 
         self.emit(&format!(
-            "for (size_t {index} = 0; {index} < {iter_c}.len; {index}++) {{"
+            "for (size_t {index} = 0; {index} < {bound}; {index}++) {{"
         ));
         self.indent += 1;
         self.push_scope();
         self.declare_var(iterator, elem_ty);
-        self.emit(&format!(
-            "{elem_c_type} {iterator} = {iter_c}.data[{index}];"
-        ));
+        self.emit(&format!("{elem_c_type} {iterator} = {data}[{index}];"));
         for inner in &body.statements {
             self.gen_stmt(inner)?;
         }

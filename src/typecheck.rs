@@ -195,12 +195,18 @@ impl Checker {
                     CheckedType::Named { name, args } if name == "Slice" && args.len() == 1 => {
                         args[0].clone()
                     }
+                    CheckedType::Named { name, args } if name == "Array" && args.len() == 2 => {
+                        args[0].clone()
+                    }
                     CheckedType::Unknown => CheckedType::Unknown,
                     other => {
                         self.emit(
                             iterable.span,
                             ErrorCode::TypeForInExpectsSlice,
-                            format!("for-in expects Slice<T>, got {}", other.display()),
+                            format!(
+                                "for-in expects Slice<T> or Array<T, N>, got {}",
+                                other.display()
+                            ),
                         );
                         CheckedType::Unknown
                     }

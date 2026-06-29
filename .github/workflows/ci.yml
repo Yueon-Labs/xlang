@@ -56,3 +56,6 @@ jobs:
 
       - name: Run print demo (output builtins)
         run: make run-print-demo
+
+      - name: Run array-sum demo (for-in over Array)
+        run: make run-array-sum
