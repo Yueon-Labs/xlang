@@ -590,7 +590,7 @@ mod tests {
     use crate::parser::Parser;
 
     fn check_source(source: &str) -> String {
-        let tokens = Lexer::new(source).tokenize().expect("lex source");
+        let (tokens, _lex_diags) = Lexer::new(source).tokenize();
         let program = Parser::new(tokens, "<test>").parse().expect("parse source");
         match check_program(&program) {
             Ok(()) => "ok".to_string(),

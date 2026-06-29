@@ -56,7 +56,20 @@ struct CapturedOutput {
 
 pub fn parse_file(path: &Path) -> XResult<Program> {
     let source = fs::read_to_string(path)?;
-    let tokens = Lexer::new(&source).tokenize()?;
+    // M2 transitional: tokenize now returns structured diagnostics. While the
+    // rest of parse_file's signature is rewired in M4, surface lexer
+    // diagnostics as a fatal error so behaviour is preserved (a lex error
+    // still fails the parse).
+    let (tokens, lex_diags) = Lexer::new(&source).tokenize();
+    if lex_diags.has_errors() {
+        let msg = lex_diags
+            .items
+            .iter()
+            .map(|d| d.message.clone())
+            .collect::<Vec<_>>()
+            .join("; ");
+        return Err(XError::Lex(msg));
+    }
     let program = Parser::new(tokens, path.display().to_string()).parse()?;
     check_program(&program)?;
     Ok(program)
