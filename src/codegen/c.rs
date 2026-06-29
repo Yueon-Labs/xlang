@@ -1083,6 +1083,7 @@ impl CGen {
                 format!("kill(({a}), ({b}))")
             }
             "random_int" => format!("(int32_t)(rand() % ({a}))"),
+            "getenv" => format!("(getenv({a}) ? getenv({a}) : \"\")"),
             "str_to_int_oct" => format!("(int32_t)strtol({a}, 0, 8)"),
             "chmod" => {
                 let Some(second) = args.get(1) else {
