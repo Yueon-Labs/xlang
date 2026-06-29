@@ -132,6 +132,13 @@ pub enum TypeNode {
 }
 
 #[derive(Clone, Debug, Serialize)]
+pub struct StructLiteralField {
+    pub kind: &'static str,
+    pub name: String,
+    pub value: Spanned<Expr>,
+}
+
+#[derive(Clone, Debug, Serialize)]
 #[serde(tag = "kind")]
 pub enum Expr {
     IntLiteral {
@@ -172,5 +179,9 @@ pub enum Expr {
     FieldAccessExpr {
         object: Box<Spanned<Expr>>,
         field: String,
+    },
+    StructLiteral {
+        name: String,
+        fields: Vec<StructLiteralField>,
     },
 }

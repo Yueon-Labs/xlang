@@ -1,7 +1,7 @@
 use crate::ast::*;
 use crate::error::{XError, XResult};
 use crate::source::Spanned;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 #[derive(Default)]
 pub struct CGen {
@@ -12,6 +12,8 @@ pub struct CGen {
     /// Return type of the function currently being generated (for constructing
     /// Some/None/Ok/Err in `return` position).
     fn_return: Option<TypeNode>,
+    /// User-defined struct names (so `c_type` recognises them as value types).
+    struct_names: HashSet<String>,
 }
 
 impl CGen {
@@ -20,6 +22,11 @@ impl CGen {
     }
 
     pub fn generate(mut self, program: &Program) -> XResult<String> {
+        for item in &program.items {
+            if let Item::StructDecl { name, .. } = &item.node {
+                self.struct_names.insert(name.clone());
+            }
+        }
         self.emit("#include <stdint.h>");
         self.emit("#include <stdbool.h>");
         self.emit("#include <stddef.h>");
@@ -225,6 +232,7 @@ impl CGen {
                 "f64" => Ok("double".to_string()),
                 "bool" => Ok("bool".to_string()),
                 "String" | "Str" => Ok("const char *".to_string()),
+                other if self.struct_names.contains(other) => Ok(other.to_string()),
                 other => Err(XError::Codegen(format!(
                     "C backend does not support type yet: {other}"
                 ))),
@@ -260,6 +268,7 @@ impl CGen {
         match ty {
             TypeNode::TypeExpr { name, args } if args.is_empty() => match name.as_str() {
                 "i32" | "i64" | "f32" | "f64" | "bool" | "String" | "Str" => Ok(name.clone()),
+                other if self.struct_names.contains(other) => Ok(other.to_string()),
                 other => Err(XError::Codegen(format!(
                     "C backend does not support {other} as a generated type suffix yet"
                 ))),
@@ -730,6 +739,13 @@ impl CGen {
             }
             Expr::FieldAccessExpr { object, field } => {
                 Ok(format!("{}.{}", self.gen_expr(object)?, field))
+            }
+            Expr::StructLiteral { name, fields } => {
+                let mut parts = Vec::new();
+                for f in fields {
+                    parts.push(format!(".{} = {}", f.name, self.gen_expr(&f.value)?));
+                }
+                Ok(format!("({name}){{ {} }}", parts.join(", ")))
             }
         }
     }

@@ -50,3 +50,6 @@ jobs:
 
       - name: Run compound assignment demo
         run: make run-compound
+
+      - name: Run struct demo (literals + field access)
+        run: make run-struct-demo

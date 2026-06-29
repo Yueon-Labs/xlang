@@ -66,6 +66,22 @@ impl Parser {
         Span::new(self.file_id, tok.start, tok.end)
     }
 
+    fn token_at(&self, offset: usize) -> &Token {
+        let idx = (self.i + offset).min(self.tokens.len() - 1);
+        &self.tokens[idx]
+    }
+
+    /// Is the cursor at `Name { field: .. }` (or `Name { }`)? The `field:` (or
+    /// `}`) lookahead disambiguates from `if x { stmt }` — valid code never has
+    /// `<ident> :` immediately after the block `{` of an if/while, so this won't
+    /// misfire on real conditions.
+    fn is_struct_literal_start(&self) -> bool {
+        self.peek().kind == TokenKind::Ident
+            && self.token_at(1).text == "{"
+            && (self.token_at(2).text == "}"
+                || (self.token_at(2).kind == TokenKind::Ident && self.token_at(3).text == ":"))
+    }
+
     fn bump(&mut self) -> Token {
         let tok = self.peek().clone();
         self.last_end = tok.end;
@@ -577,8 +593,12 @@ impl Parser {
                 Ok(Spanned::new(Expr::StringLiteral { value: tok.text }, span))
             }
             TokenKind::Ident => {
-                self.bump();
-                Ok(Spanned::new(Expr::Identifier { name: tok.text }, span))
+                if self.is_struct_literal_start() {
+                    self.parse_struct_literal()
+                } else {
+                    self.bump();
+                    Ok(Spanned::new(Expr::Identifier { name: tok.text }, span))
+                }
             }
             TokenKind::Keyword if tok.text == "true" || tok.text == "false" => {
                 self.bump();
@@ -620,6 +640,31 @@ impl Parser {
         self.expect("]")?;
         Ok(Spanned::new(
             Expr::ArrayLiteral { elements },
+            Span::new(self.file_id, start, self.last_end),
+        ))
+    }
+
+    fn parse_struct_literal(&mut self) -> Result<Spanned<Expr>, Diagnostic> {
+        let start = self.cur_start();
+        let name = self.expect_ident()?.text;
+        self.expect("{")?;
+        let mut fields = Vec::new();
+        while !self.check("}") {
+            let field_name = self.expect_ident()?.text;
+            self.expect(":")?;
+            let value = self.parse_expr()?;
+            fields.push(StructLiteralField {
+                kind: "StructLiteralField",
+                name: field_name,
+                value,
+            });
+            if !self.match_text(",") {
+                break;
+            }
+        }
+        self.expect("}")?;
+        Ok(Spanned::new(
+            Expr::StructLiteral { name, fields },
             Span::new(self.file_id, start, self.last_end),
         ))
     }

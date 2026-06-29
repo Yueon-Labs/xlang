@@ -38,6 +38,7 @@ struct FnSig {
 struct Checker {
     scopes: Vec<HashMap<String, VarInfo>>,
     functions: HashMap<String, FnSig>,
+    structs: HashMap<String, Vec<(String, CheckedType)>>,
     return_types: Vec<CheckedType>,
     diags: Diagnostics,
 }
@@ -46,6 +47,7 @@ struct Checker {
 pub fn check_program(program: &Program) -> Diagnostics {
     let mut checker = Checker::default();
     checker.collect_functions(program);
+    checker.collect_structs(program);
     checker.check_program(program);
     checker.diags
 }
@@ -74,6 +76,18 @@ impl Checker {
                         return_type: type_from_node(return_type),
                     },
                 );
+            }
+        }
+    }
+
+    fn collect_structs(&mut self, program: &Program) {
+        for item in &program.items {
+            if let Item::StructDecl { name, fields } = &item.node {
+                let field_types = fields
+                    .iter()
+                    .map(|f| (f.name.clone(), type_from_node(&f.ty)))
+                    .collect();
+                self.structs.insert(name.clone(), field_types);
             }
         }
     }
@@ -279,9 +293,49 @@ impl Checker {
                 target_ty
             }
             Expr::CallExpr { callee, args } => self.infer_call_expr(callee, args, span),
-            Expr::FieldAccessExpr { object, .. } => {
-                self.infer_expr(object);
+            Expr::FieldAccessExpr { object, field } => {
+                let obj_ty = self.infer_expr(object);
+                if let CheckedType::Named { name, .. } = &obj_ty
+                    && let Some(fields) = self.structs.get(name)
+                    && let Some((_, field_ty)) = fields.iter().find(|(n, _)| n == field)
+                {
+                    return field_ty.clone();
+                }
                 CheckedType::Unknown
+            }
+            Expr::StructLiteral { name, fields } => {
+                // Clone the declared fields so we don't hold a borrow of self
+                // across the mutable infer_expr calls below.
+                let decl_fields = self.structs.get(name).cloned();
+                match decl_fields {
+                    Some(decl_fields) => {
+                        for f in fields {
+                            let val_ty = self.infer_expr(&f.value);
+                            match decl_fields.iter().find(|(n, _)| n == &f.name) {
+                                Some((_, field_ty)) => self.expect_assignable(
+                                    field_ty,
+                                    &val_ty,
+                                    &format!("struct field {:?}", f.name),
+                                    f.value.span,
+                                ),
+                                None => self.emit(
+                                    f.value.span,
+                                    ErrorCode::TypeMismatch,
+                                    format!("struct {name:?} has no field {:?}", f.name),
+                                ),
+                            }
+                        }
+                        CheckedType::named(name)
+                    }
+                    None => {
+                        self.emit(
+                            span,
+                            ErrorCode::TypeMismatch,
+                            format!("unknown struct type {name:?}"),
+                        );
+                        CheckedType::Unknown
+                    }
+                }
             }
         }
     }
