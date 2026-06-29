@@ -33,6 +33,17 @@ Even under ~5× the load, xlang's **blocking** server stays level with nginx. Fo
 
 **nginx is ~8.5× faster under keepalive concurrency.** xlang serves one connection at a time — its inner keepalive loop blocks on `recv`, starving the other 15 connections; nginx's epoll serves all 16 concurrently. This is the workload that triggers "modify x": add concurrency (fork workers / epoll event loop) so xlang can serve many connections at once.
 
+### After "modify x": `fork()` + prefork workers — `bench/bench_ka.py`, 16 conns
+Added `fork()`/`getpid()` builtins so xlang can run the **prefork** worker model (nginx/apache prefork). `examples/server_prefork.x`: 16 workers, each a blocking keepalive loop on the shared listen socket. Same workload, same machine:
+| server                    | req/s     |
+|---------------------------|-----------|
+| nginx 1.28                | ~77,200   |
+| xlang prefork (16 workers) | ~128,600  |
+
+The gap **reversed**: from 8.5× slower (1 blocking worker, ~8.2k) to ~1.67× **faster** than nginx (16 workers, ~128.6k). "Modify x" (add concurrency via fork) closed the measured gap decisively.
+
+**Honest caveat:** this is a trivial fixed-response workload where a minimal server can beat nginx — nginx does full HTTP parsing + header generation + module chain per request, while xlang blasts a fixed 5-byte string. Real workloads (request parsing, routing, file serving) would rebalance this. Still: xlang → C → prefork is genuinely fast, and the modify-x cycle produced a measured, reproducible improvement.
+
 ## Honest caveats — this is NOT "xlang beats nginx"
 1. **Trivial workload** (5-byte fixed response). nginx's machinery overhead dominates when the work is tiny, so a minimal hand-written server can match it. Real workloads (file serving, proxying, keepalive, real HTTP parsing) would change the picture.
 2. **The load generator (python, threading + GIL) likely caps the measurement** around ~2000–2500 req/s — the client may be the bottleneck, so the true server ceilings are not reached.
