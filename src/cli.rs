@@ -3,7 +3,10 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use crate::driver::{RunSafeOptions, build_exe, parse_file, run_safe, write_c};
+use crate::driver::{
+    RunSafeOptions, build_exe, diagnostics_to_gcc, diagnostics_to_serializable, parse_collecting,
+    parse_file, run_safe, write_c,
+};
 use crate::error::{XError, XResult};
 
 pub fn run_cli() -> XResult<()> {
@@ -16,18 +19,58 @@ pub fn run_cli() -> XResult<()> {
     let cmd = args.remove(0);
     match cmd.as_str() {
         "check" => {
-            if args.is_empty() {
-                return Err(XError::Parse("usage: xlangc check <files...>".into()));
-            }
-            let mut ok = true;
-            for file in args {
-                match parse_file(Path::new(&file)) {
-                    Ok(_) => println!("[ok] {file}"),
-                    Err(err) => {
-                        ok = false;
-                        eprintln!("[error] {file}: {err}");
+            let mut format_json = false;
+            let mut files: Vec<String> = Vec::new();
+            let mut i = 0;
+            while i < args.len() {
+                match args[i].as_str() {
+                    "--format" => {
+                        if i + 1 < args.len() && args[i + 1] == "json" {
+                            format_json = true;
+                            i += 2;
+                        } else {
+                            return Err(XError::Parse(
+                                "usage: xlangc check <files...> [--format json]".into(),
+                            ));
+                        }
+                    }
+                    "--format=json" => {
+                        format_json = true;
+                        i += 1;
+                    }
+                    other => {
+                        files.push(other.to_string());
+                        i += 1;
                     }
                 }
+            }
+            if files.is_empty() {
+                return Err(XError::Parse(
+                    "usage: xlangc check <files...> [--format json]".into(),
+                ));
+            }
+
+            let mut ok = true;
+            let mut all: Vec<_> = Vec::new();
+            for file in &files {
+                let (_program, source, diags) = parse_collecting(Path::new(file.as_str()))?;
+                if diags.is_empty() {
+                    if !format_json {
+                        println!("[ok] {file}");
+                    }
+                } else {
+                    ok = false;
+                    if format_json {
+                        all.extend(diagnostics_to_serializable(&diags, &source, file));
+                    } else {
+                        for line in diagnostics_to_gcc(&diags, &source, file) {
+                            eprintln!("{line}");
+                        }
+                    }
+                }
+            }
+            if format_json {
+                println!("{}", serde_json::to_string_pretty(&all)?);
             }
             if ok {
                 Ok(())
@@ -82,7 +125,7 @@ fn print_help() {
     println!(
         "xlangc - minimal X Language compiler prototype\n\n\
          Commands:\n\
-           xlangc check <files...>        Parse files\n\
+           xlangc check <files...> [--format json]  Check and report diagnostics\n\
            xlangc ast <file>              Print JSON AST\n\
            xlangc c <file> [-o out.c]     Generate C for supported subset\n\
            xlangc build <file> [-o out]   Build native executable\n\
