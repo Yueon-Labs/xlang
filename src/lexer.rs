@@ -223,6 +223,7 @@ impl Lexer {
                     'r' => '\r',
                     '"' => '"',
                     '\\' => '\\',
+                    'e' => '\x1b',
                     other => other,
                 });
             } else {
