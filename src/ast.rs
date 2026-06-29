@@ -184,4 +184,8 @@ pub enum Expr {
         name: String,
         fields: Vec<StructLiteralField>,
     },
+    IndexExpr {
+        object: Box<Spanned<Expr>>,
+        index: Box<Spanned<Expr>>,
+    },
 }

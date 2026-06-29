@@ -309,6 +309,34 @@ impl Checker {
                 }
                 CheckedType::Unknown
             }
+            Expr::IndexExpr { object, index } => {
+                let obj_ty = self.infer_expr(object);
+                let idx_ty = self.infer_expr(index);
+                if !idx_ty.is_unknown() && !idx_ty.is_int_literal() && !idx_ty.is_integer_scalar() {
+                    self.emit(
+                        span,
+                        ErrorCode::TypeMismatch,
+                        format!("array index must be an integer, got {}", idx_ty.display()),
+                    );
+                }
+                match &obj_ty {
+                    CheckedType::Named { name, args } if name == "Array" && args.len() == 2 => {
+                        args[0].clone()
+                    }
+                    CheckedType::Named { name, args } if name == "Slice" && args.len() == 1 => {
+                        args[0].clone()
+                    }
+                    CheckedType::Unknown => CheckedType::Unknown,
+                    other => {
+                        self.emit(
+                            span,
+                            ErrorCode::TypeMismatch,
+                            format!("cannot index into {}", other.display()),
+                        );
+                        CheckedType::Unknown
+                    }
+                }
+            }
             Expr::StructLiteral { name, fields } => {
                 // Clone the declared fields so we don't hold a borrow of self
                 // across the mutable infer_expr calls below.
@@ -480,6 +508,23 @@ impl Checker {
             Expr::FieldAccessExpr { object, .. } => {
                 self.check_assignment_target(object);
                 CheckedType::Unknown
+            }
+            Expr::IndexExpr { object, .. } => {
+                let obj_ty = self.infer_expr(object);
+                match &obj_ty {
+                    CheckedType::Named { name, args } if name == "Array" && args.len() == 2 => {
+                        args[0].clone()
+                    }
+                    CheckedType::Unknown => CheckedType::Unknown,
+                    other => {
+                        self.emit(
+                            span,
+                            ErrorCode::TypeMismatch,
+                            format!("cannot assign to index of {}", other.display()),
+                        );
+                        CheckedType::Unknown
+                    }
+                }
             }
             _ => {
                 self.emit(

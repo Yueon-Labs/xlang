@@ -570,6 +570,18 @@ impl Parser {
                     },
                     span,
                 );
+            } else if self.match_text("[") {
+                let start = expr.span.start;
+                let index = self.parse_expr()?;
+                self.expect("]")?;
+                let span = Span::new(self.file_id, start, self.last_end);
+                expr = Spanned::new(
+                    Expr::IndexExpr {
+                        object: Box::new(expr),
+                        index: Box::new(index),
+                    },
+                    span,
+                );
             } else {
                 return Ok(expr);
             }

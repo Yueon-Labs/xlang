@@ -790,6 +790,15 @@ impl CGen {
                 }
                 Ok(format!("({name}){{ {} }}", parts.join(", ")))
             }
+            Expr::IndexExpr { object, index } => {
+                // Both Array<T,N> and Slice<T> store elements in `.data`, so
+                // indexing lowers uniformly.
+                Ok(format!(
+                    "{}.data[{}]",
+                    self.gen_expr(object)?,
+                    self.gen_expr(index)?
+                ))
+            }
         }
     }
 }
