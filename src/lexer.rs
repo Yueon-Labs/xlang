@@ -12,12 +12,13 @@ pub(crate) enum TokenKind {
     Eof,
 }
 
+/// A lexed token. Position is byte offsets only (`start` inclusive, `end`
+/// exclusive); line/column are derived on demand via `LineIndex`, so bytes are
+/// the single source of truth.
 #[derive(Clone, Debug)]
 pub(crate) struct Token {
     pub(crate) kind: TokenKind,
     pub(crate) text: String,
-    pub(crate) line: usize,
-    pub(crate) col: usize,
     /// Byte offset of the first character of the token (inclusive).
     pub(crate) start: u32,
     /// Byte offset just past the last character of the token (exclusive).
@@ -30,8 +31,6 @@ pub struct Lexer {
     /// Byte offset in the original source (advances by `char.len_utf8()` per
     /// consumed char, so it stays correct for non-ASCII — unlike the char index `i`).
     byte_offset: usize,
-    line: usize,
-    col: usize,
     tokens: Vec<Token>,
     diags: Diagnostics,
     file_id: u32,
@@ -43,8 +42,6 @@ impl Lexer {
             chars: source.chars().collect(),
             i: 0,
             byte_offset: 0,
-            line: 1,
-            col: 1,
             tokens: Vec::new(),
             diags: Diagnostics::new(),
             file_id: 0,
@@ -114,8 +111,6 @@ impl Lexer {
         self.tokens.push(Token {
             kind: TokenKind::Eof,
             text: "<eof>".to_string(),
-            line: self.line,
-            col: self.col,
             start: end,
             end,
         });
@@ -134,12 +129,6 @@ impl Lexer {
         let ch = self.chars[self.i];
         self.i += 1;
         self.byte_offset += ch.len_utf8();
-        if ch == '\n' {
-            self.line += 1;
-            self.col = 1;
-        } else {
-            self.col += 1;
-        }
         ch
     }
 
@@ -150,22 +139,17 @@ impl Lexer {
     }
 
     fn push(&mut self, kind: TokenKind, text: String) {
-        let width_chars = text.chars().count();
         let end = self.byte_offset as u32;
         let start = end.saturating_sub(text.len() as u32);
         self.tokens.push(Token {
             kind,
             text,
-            line: self.line,
-            col: self.col.saturating_sub(width_chars),
             start,
             end,
         });
     }
 
     fn lex_ident(&mut self) {
-        let start_line = self.line;
-        let start_col = self.col;
         let start_byte = self.byte_offset;
         let start_idx = self.i;
         while !self.is_eof()
@@ -183,16 +167,12 @@ impl Lexer {
         self.tokens.push(Token {
             kind,
             text,
-            line: start_line,
-            col: start_col,
             start: start_byte as u32,
             end: end_byte as u32,
         });
     }
 
     fn lex_number(&mut self) {
-        let start_line = self.line;
-        let start_col = self.col;
         let start_byte = self.byte_offset;
         let start_idx = self.i;
         while !self.is_eof() && self.peek_char(0).is_ascii_digit() {
@@ -211,16 +191,12 @@ impl Lexer {
         self.tokens.push(Token {
             kind,
             text,
-            line: start_line,
-            col: start_col,
             start: start_byte as u32,
             end: end_byte as u32,
         });
     }
 
     fn lex_string(&mut self) {
-        let start_line = self.line;
-        let start_col = self.col;
         let start_byte = self.byte_offset;
         self.advance(); // opening quote
         let mut value = String::new();
@@ -231,8 +207,6 @@ impl Lexer {
                 self.tokens.push(Token {
                     kind: TokenKind::String,
                     text: value,
-                    line: start_line,
-                    col: start_col,
                     start: start_byte as u32,
                     end: end_byte as u32,
                 });

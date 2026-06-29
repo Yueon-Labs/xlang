@@ -1,12 +1,11 @@
 use crate::ast::*;
-use crate::error::{XError, XResult};
+use crate::error::{Diagnostic, ErrorCode};
 use crate::lexer::{Token, TokenKind};
 use crate::source::{Span, Spanned};
 
 pub struct Parser {
     tokens: Vec<Token>,
     i: usize,
-    file: String,
     file_id: u32,
     /// Byte offset just past the most recently consumed token; lets a saved
     /// start offset be turned into a span via `span_from(start)`.
@@ -14,17 +13,16 @@ pub struct Parser {
 }
 
 impl Parser {
-    pub(crate) fn new(tokens: Vec<Token>, file: impl Into<String>) -> Self {
+    pub(crate) fn new(tokens: Vec<Token>, _file: impl Into<String>) -> Self {
         Self {
             tokens,
             i: 0,
-            file: file.into(),
             file_id: 0,
             last_end: 0,
         }
     }
 
-    pub fn parse(&mut self) -> XResult<Program> {
+    pub fn parse(&mut self) -> Result<Program, Diagnostic> {
         let module = self.parse_module_decl()?;
         let mut imports = Vec::new();
         while self.check("import") {
@@ -64,6 +62,10 @@ impl Parser {
         Span::new(self.file_id, start, self.last_end)
     }
 
+    fn tok_span(&self, tok: &Token) -> Span {
+        Span::new(self.file_id, tok.start, tok.end)
+    }
+
     fn bump(&mut self) -> Token {
         let tok = self.peek().clone();
         self.last_end = tok.end;
@@ -82,31 +84,33 @@ impl Parser {
         }
     }
 
-    fn expect(&mut self, text: &str) -> XResult<Token> {
+    fn expect(&mut self, text: &str) -> Result<Token, Diagnostic> {
         if self.check(text) {
             Ok(self.bump())
         } else {
             let tok = self.peek();
-            Err(XError::Parse(format!(
-                "expected {text:?}, got {:?} at {}:{}:{}",
-                tok.text, self.file, tok.line, tok.col
-            )))
+            Err(Diagnostic::error(
+                ErrorCode::ParseExpectedToken,
+                self.tok_span(tok),
+                format!("expected {text:?}, got {:?}", tok.text),
+            ))
         }
     }
 
-    fn expect_ident(&mut self) -> XResult<Token> {
+    fn expect_ident(&mut self) -> Result<Token, Diagnostic> {
         let tok = self.peek();
         if tok.kind == TokenKind::Ident {
             Ok(self.bump())
         } else {
-            Err(XError::Parse(format!(
-                "expected identifier, got {:?} at {}:{}:{}",
-                tok.text, self.file, tok.line, tok.col
-            )))
+            Err(Diagnostic::error(
+                ErrorCode::ParseExpectedIdent,
+                self.tok_span(tok),
+                format!("expected identifier, got {:?}", tok.text),
+            ))
         }
     }
 
-    fn parse_module_decl(&mut self) -> XResult<ModuleDecl> {
+    fn parse_module_decl(&mut self) -> Result<ModuleDecl, Diagnostic> {
         self.expect("module")?;
         Ok(ModuleDecl {
             kind: "ModuleDecl",
@@ -114,7 +118,7 @@ impl Parser {
         })
     }
 
-    fn parse_import_decl(&mut self) -> XResult<ImportDecl> {
+    fn parse_import_decl(&mut self) -> Result<ImportDecl, Diagnostic> {
         self.expect("import")?;
         Ok(ImportDecl {
             kind: "ImportDecl",
@@ -122,7 +126,7 @@ impl Parser {
         })
     }
 
-    fn parse_path(&mut self) -> XResult<Vec<String>> {
+    fn parse_path(&mut self) -> Result<Vec<String>, Diagnostic> {
         let mut parts = vec![self.expect_ident()?.text];
         while self.match_text(".") {
             parts.push(self.expect_ident()?.text);
@@ -130,7 +134,7 @@ impl Parser {
         Ok(parts)
     }
 
-    fn parse_item(&mut self) -> XResult<Spanned<Item>> {
+    fn parse_item(&mut self) -> Result<Spanned<Item>, Diagnostic> {
         let start = self.cur_start();
         let node = if self.check("struct") {
             self.parse_struct_decl()?
@@ -140,15 +144,16 @@ impl Parser {
             self.parse_fn_decl()?
         } else {
             let tok = self.peek();
-            return Err(XError::Parse(format!(
-                "expected item, got {:?} at {}:{}:{}",
-                tok.text, self.file, tok.line, tok.col
-            )));
+            return Err(Diagnostic::error(
+                ErrorCode::ParseUnknownItem,
+                self.tok_span(tok),
+                format!("expected item (struct/type/fn), got {:?}", tok.text),
+            ));
         };
         Ok(Spanned::new(node, self.span_from(start)))
     }
 
-    fn parse_struct_decl(&mut self) -> XResult<Item> {
+    fn parse_struct_decl(&mut self) -> Result<Item, Diagnostic> {
         self.expect("struct")?;
         let name = self.expect_ident()?.text;
         self.expect("{")?;
@@ -167,7 +172,7 @@ impl Parser {
         Ok(Item::StructDecl { name, fields })
     }
 
-    fn parse_type_alias(&mut self) -> XResult<Item> {
+    fn parse_type_alias(&mut self) -> Result<Item, Diagnostic> {
         self.expect("type")?;
         let name = self.expect_ident()?.text;
         self.expect("=")?;
@@ -175,7 +180,7 @@ impl Parser {
         Ok(Item::TypeAliasDecl { name, ty })
     }
 
-    fn parse_fn_decl(&mut self) -> XResult<Item> {
+    fn parse_fn_decl(&mut self) -> Result<Item, Diagnostic> {
         self.expect("fn")?;
         let name = self.expect_ident()?.text;
         self.expect("(")?;
@@ -198,7 +203,7 @@ impl Parser {
         })
     }
 
-    fn parse_param(&mut self) -> XResult<Param> {
+    fn parse_param(&mut self) -> Result<Param, Diagnostic> {
         let name = self.expect_ident()?.text;
         self.expect(":")?;
         let ty = self.parse_type_expr()?;
@@ -209,7 +214,7 @@ impl Parser {
         })
     }
 
-    fn parse_type_expr(&mut self) -> XResult<TypeNode> {
+    fn parse_type_expr(&mut self) -> Result<TypeNode, Diagnostic> {
         let name = self.expect_ident()?.text;
         let mut args = Vec::new();
         if self.match_text("<") {
@@ -222,7 +227,7 @@ impl Parser {
         Ok(TypeNode::TypeExpr { name, args })
     }
 
-    fn parse_type_arg(&mut self) -> XResult<TypeNode> {
+    fn parse_type_arg(&mut self) -> Result<TypeNode, Diagnostic> {
         if self.peek().kind == TokenKind::Int {
             return Ok(TypeNode::ConstTypeArg {
                 value: self.bump().text,
@@ -231,16 +236,17 @@ impl Parser {
         self.parse_type_expr()
     }
 
-    fn parse_block(&mut self) -> XResult<Block> {
+    fn parse_block(&mut self) -> Result<Block, Diagnostic> {
         self.expect("{")?;
         let mut statements = Vec::new();
         while !self.check("}") {
             if self.is_eof() {
                 let tok = self.peek();
-                return Err(XError::Parse(format!(
-                    "unterminated block at {}:{}:{}",
-                    self.file, tok.line, tok.col
-                )));
+                return Err(Diagnostic::error(
+                    ErrorCode::ParseUnterminatedBlock,
+                    self.tok_span(tok),
+                    "unterminated block",
+                ));
             }
             statements.push(self.parse_stmt()?);
         }
@@ -251,7 +257,7 @@ impl Parser {
         })
     }
 
-    fn parse_stmt(&mut self) -> XResult<Spanned<Stmt>> {
+    fn parse_stmt(&mut self) -> Result<Spanned<Stmt>, Diagnostic> {
         if self.check("let") {
             self.parse_let_stmt()
         } else if self.check("if") {
@@ -279,7 +285,7 @@ impl Parser {
         }
     }
 
-    fn parse_let_stmt(&mut self) -> XResult<Spanned<Stmt>> {
+    fn parse_let_stmt(&mut self) -> Result<Spanned<Stmt>, Diagnostic> {
         let start = self.cur_start();
         self.expect("let")?;
         let mutable = self.match_text("mut");
@@ -299,7 +305,7 @@ impl Parser {
         ))
     }
 
-    fn parse_if_stmt(&mut self) -> XResult<Spanned<Stmt>> {
+    fn parse_if_stmt(&mut self) -> Result<Spanned<Stmt>, Diagnostic> {
         let start = self.cur_start();
         self.expect("if")?;
         let condition = self.parse_expr()?;
@@ -323,7 +329,7 @@ impl Parser {
         ))
     }
 
-    fn parse_for_stmt(&mut self) -> XResult<Spanned<Stmt>> {
+    fn parse_for_stmt(&mut self) -> Result<Spanned<Stmt>, Diagnostic> {
         let start = self.cur_start();
         self.expect("for")?;
         let iterator = self.expect_ident()?.text;
@@ -340,7 +346,7 @@ impl Parser {
         ))
     }
 
-    fn parse_while_stmt(&mut self) -> XResult<Spanned<Stmt>> {
+    fn parse_while_stmt(&mut self) -> Result<Spanned<Stmt>, Diagnostic> {
         let start = self.cur_start();
         self.expect("while")?;
         let condition = self.parse_expr()?;
@@ -351,7 +357,7 @@ impl Parser {
         ))
     }
 
-    fn parse_match_stmt(&mut self) -> XResult<Spanned<Stmt>> {
+    fn parse_match_stmt(&mut self) -> Result<Spanned<Stmt>, Diagnostic> {
         let start = self.cur_start();
         self.expect("match")?;
         let value = self.parse_expr()?;
@@ -374,7 +380,7 @@ impl Parser {
         ))
     }
 
-    fn parse_pattern(&mut self) -> XResult<Pattern> {
+    fn parse_pattern(&mut self) -> Result<Pattern, Diagnostic> {
         let name = self.expect_ident()?.text;
         let mut bindings = Vec::new();
         if self.match_text("(") {
@@ -389,7 +395,7 @@ impl Parser {
         Ok(Pattern::VariantPattern { name, bindings })
     }
 
-    fn parse_return_stmt(&mut self) -> XResult<Spanned<Stmt>> {
+    fn parse_return_stmt(&mut self) -> Result<Spanned<Stmt>, Diagnostic> {
         let start = self.cur_start();
         self.expect("return")?;
         let value = if self.check("}") {
@@ -403,11 +409,11 @@ impl Parser {
         ))
     }
 
-    fn parse_expr(&mut self) -> XResult<Spanned<Expr>> {
+    fn parse_expr(&mut self) -> Result<Spanned<Expr>, Diagnostic> {
         self.parse_assignment()
     }
 
-    fn parse_assignment(&mut self) -> XResult<Spanned<Expr>> {
+    fn parse_assignment(&mut self) -> Result<Spanned<Expr>, Diagnostic> {
         let expr = self.parse_logical_or()?;
         if self.match_text("=") {
             let value = self.parse_assignment()?;
@@ -423,7 +429,7 @@ impl Parser {
         Ok(expr)
     }
 
-    fn parse_logical_or(&mut self) -> XResult<Spanned<Expr>> {
+    fn parse_logical_or(&mut self) -> Result<Spanned<Expr>, Diagnostic> {
         let mut expr = self.parse_logical_and()?;
         while self.match_text("||") {
             let right = self.parse_logical_and()?;
@@ -432,7 +438,7 @@ impl Parser {
         Ok(expr)
     }
 
-    fn parse_logical_and(&mut self) -> XResult<Spanned<Expr>> {
+    fn parse_logical_and(&mut self) -> Result<Spanned<Expr>, Diagnostic> {
         let mut expr = self.parse_equality()?;
         while self.match_text("&&") {
             let right = self.parse_equality()?;
@@ -441,7 +447,7 @@ impl Parser {
         Ok(expr)
     }
 
-    fn parse_equality(&mut self) -> XResult<Spanned<Expr>> {
+    fn parse_equality(&mut self) -> Result<Spanned<Expr>, Diagnostic> {
         let mut expr = self.parse_comparison()?;
         while self.check("==") || self.check("!=") {
             let op = self.bump().text;
@@ -451,7 +457,7 @@ impl Parser {
         Ok(expr)
     }
 
-    fn parse_comparison(&mut self) -> XResult<Spanned<Expr>> {
+    fn parse_comparison(&mut self) -> Result<Spanned<Expr>, Diagnostic> {
         let mut expr = self.parse_term()?;
         while matches!(self.peek().text.as_str(), ">" | ">=" | "<" | "<=") {
             let op = self.bump().text;
@@ -461,7 +467,7 @@ impl Parser {
         Ok(expr)
     }
 
-    fn parse_term(&mut self) -> XResult<Spanned<Expr>> {
+    fn parse_term(&mut self) -> Result<Spanned<Expr>, Diagnostic> {
         let mut expr = self.parse_factor()?;
         while self.check("+") || self.check("-") {
             let op = self.bump().text;
@@ -471,7 +477,7 @@ impl Parser {
         Ok(expr)
     }
 
-    fn parse_factor(&mut self) -> XResult<Spanned<Expr>> {
+    fn parse_factor(&mut self) -> Result<Spanned<Expr>, Diagnostic> {
         let mut expr = self.parse_unary()?;
         while self.check("*") || self.check("/") || self.check("%") {
             let op = self.bump().text;
@@ -481,7 +487,7 @@ impl Parser {
         Ok(expr)
     }
 
-    fn parse_unary(&mut self) -> XResult<Spanned<Expr>> {
+    fn parse_unary(&mut self) -> Result<Spanned<Expr>, Diagnostic> {
         if self.check("!") || self.check("-") {
             let start = self.cur_start();
             let op = self.bump().text;
@@ -498,7 +504,7 @@ impl Parser {
         self.parse_postfix()
     }
 
-    fn parse_postfix(&mut self) -> XResult<Spanned<Expr>> {
+    fn parse_postfix(&mut self) -> Result<Spanned<Expr>, Diagnostic> {
         let mut expr = self.parse_primary()?;
         loop {
             if self.match_text("(") {
@@ -536,9 +542,9 @@ impl Parser {
         }
     }
 
-    fn parse_primary(&mut self) -> XResult<Spanned<Expr>> {
+    fn parse_primary(&mut self) -> Result<Spanned<Expr>, Diagnostic> {
         let tok = self.peek().clone();
-        let span = Span::new(self.file_id, tok.start, tok.end);
+        let span = self.tok_span(&tok);
         match tok.kind {
             TokenKind::Int => {
                 self.bump();
@@ -572,14 +578,15 @@ impl Parser {
                 Ok(expr)
             }
             _ if tok.text == "[" => self.parse_array_literal(),
-            _ => Err(XError::Parse(format!(
-                "expected expression, got {:?} at {}:{}:{}",
-                tok.text, self.file, tok.line, tok.col
-            ))),
+            _ => Err(Diagnostic::error(
+                ErrorCode::ParseExpectedExpression,
+                span,
+                format!("expected expression, got {:?}", tok.text),
+            )),
         }
     }
 
-    fn parse_array_literal(&mut self) -> XResult<Spanned<Expr>> {
+    fn parse_array_literal(&mut self) -> Result<Spanned<Expr>, Diagnostic> {
         let start = self.cur_start();
         self.expect("[")?;
         let mut elements = Vec::new();

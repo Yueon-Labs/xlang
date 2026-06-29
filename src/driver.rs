@@ -8,10 +8,10 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use crate::ast::Program;
 use crate::codegen::c::CGen;
-use crate::error::{Diagnostic, Diagnostics, ErrorCode, Severity, XError, XResult};
+use crate::error::{Diagnostics, ErrorCode, Severity, XError, XResult};
 use crate::lexer::Lexer;
 use crate::parser::Parser;
-use crate::source::{LineIndex, Span};
+use crate::source::LineIndex;
 use crate::typecheck::check_program;
 
 const DEFAULT_RUN_SAFE_TIMEOUT_MS: u64 = 2_000;
@@ -62,7 +62,6 @@ struct CapturedOutput {
 /// was produced. Only fatal I/O errors propagate via `XResult`.
 pub fn parse_collecting(path: &Path) -> XResult<(Option<Program>, String, Diagnostics)> {
     let source = fs::read_to_string(path)?;
-    let file_id = 0u32;
     let mut diags = Diagnostics::new();
 
     let (tokens, lex_diags) = Lexer::new(&source).tokenize();
@@ -70,14 +69,8 @@ pub fn parse_collecting(path: &Path) -> XResult<(Option<Program>, String, Diagno
 
     let program = match Parser::new(tokens, path.display().to_string()).parse() {
         Ok(program) => Some(program),
-        Err(err) => {
-            // Parser still uses XError::Parse (M3c will give it real spans); for
-            // now surface it as one diagnostic with an unknown span.
-            diags.push(Diagnostic::error(
-                ErrorCode::ParseUnexpectedToken,
-                Span::unknown(file_id),
-                err.to_string(),
-            ));
+        Err(diag) => {
+            diags.push(diag);
             None
         }
     };
