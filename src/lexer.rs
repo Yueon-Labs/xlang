@@ -89,7 +89,7 @@ impl Lexer {
                 continue;
             }
 
-            if "{}()[]:,.<>+-*/%=!".contains(ch) {
+            if "{}()[]:,.<>&|^~+-*/%=!".contains(ch) {
                 let text = ch.to_string();
                 self.advance();
                 self.push(TokenKind::Symbol, text);
@@ -240,7 +240,7 @@ impl Lexer {
 
     fn match_multi_symbol(&mut self) -> Option<String> {
         for sym in [
-            "=>", "==", "!=", ">=", "<=", "&&", "||", "+=", "-=", "*=", "/=", "%=",
+            "=>", "==", "!=", ">=", "<=", "&&", "||", "+=", "-=", "*=", "/=", "%=", "<<", ">>",
         ] {
             let sym_chars: Vec<char> = sym.chars().collect();
             if self.chars.get(self.i..self.i + sym_chars.len()) == Some(sym_chars.as_slice()) {

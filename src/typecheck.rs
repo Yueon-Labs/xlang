@@ -390,7 +390,9 @@ impl Checker {
         let left_ty = self.infer_expr(left);
         let right_ty = self.infer_expr(right);
         match op {
-            "+" | "-" | "*" | "/" | "%" => self.infer_numeric_result(op, &left_ty, &right_ty, span),
+            "+" | "-" | "*" | "/" | "%" | "&" | "|" | "^" | "<<" | ">>" => {
+                self.infer_numeric_result(op, &left_ty, &right_ty, span)
+            }
             ">" | ">=" | "<" | "<=" => {
                 self.expect_numeric_pair(op, &left_ty, &right_ty, span);
                 CheckedType::named("bool")
@@ -431,6 +433,10 @@ impl Checker {
             }
             "-" => {
                 self.expect_numeric(&value_ty, "operand of unary -", value.span);
+                value_ty
+            }
+            "~" => {
+                self.expect_numeric(&value_ty, "operand of ~", value.span);
                 value_ty
             }
             _ => CheckedType::Unknown,
