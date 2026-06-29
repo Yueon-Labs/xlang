@@ -9,6 +9,9 @@ pub struct CGen {
     indent: usize,
     scopes: Vec<HashMap<String, TypeNode>>,
     temp_counter: usize,
+    /// Return type of the function currently being generated (for constructing
+    /// Some/None/Ok/Err in `return` position).
+    fn_return: Option<TypeNode>,
 }
 
 impl CGen {
@@ -361,9 +364,11 @@ impl CGen {
         for param in params {
             self.declare_var(&param.name, param.ty.clone());
         }
+        self.fn_return = Some(return_type.clone());
         for stmt in &body.statements {
             self.gen_stmt(stmt)?;
         }
+        self.fn_return = None;
         self.pop_scope();
         self.indent -= 1;
         self.emit("}");
@@ -376,7 +381,17 @@ impl CGen {
                 name, ty, value, ..
             } => self.gen_let_stmt(name, ty, value)?,
             Stmt::ReturnStmt { value } => match value {
-                Some(expr) => self.emit(&format!("return {};", self.gen_expr(expr)?)),
+                Some(expr) => {
+                    let rendered = if let Some(ret_ty) = &self.fn_return {
+                        match self.try_constructor(ret_ty, expr)? {
+                            Some(c) => c,
+                            None => self.gen_expr(expr)?,
+                        }
+                    } else {
+                        self.gen_expr(expr)?
+                    };
+                    self.emit(&format!("return {rendered};"));
+                }
                 None => self.emit("return;"),
             },
             Stmt::IfStmt {
@@ -434,9 +449,59 @@ impl CGen {
         Ok(())
     }
 
+    /// If `value` is a Some/None/Ok/Err constructor for the Option/Result `ty`,
+    /// render the C compound literal; otherwise return `None`.
+    fn try_constructor(&self, ty: &TypeNode, value: &Spanned<Expr>) -> XResult<Option<String>> {
+        let TypeNode::TypeExpr { name, args } = ty else {
+            return Ok(None);
+        };
+        let alias = self.c_type(ty)?;
+        match (name.as_str(), args.len()) {
+            ("Option", 1) => match &value.node {
+                Expr::CallExpr {
+                    callee,
+                    args: cargs,
+                } if matches!(&callee.node, Expr::Identifier { name: n } if n == "Some")
+                    && cargs.len() == 1 =>
+                {
+                    let v = self.gen_expr(&cargs[0])?;
+                    Ok(Some(format!("({alias}){{ .some = true, .value = {v} }}")))
+                }
+                Expr::Identifier { name: n } if n == "None" => {
+                    Ok(Some(format!("({alias}){{ .some = false }}")))
+                }
+                _ => Ok(None),
+            },
+            ("Result", 2) => match &value.node {
+                Expr::CallExpr {
+                    callee,
+                    args: cargs,
+                } if matches!(&callee.node, Expr::Identifier { name: n } if n == "Ok")
+                    && cargs.len() == 1 =>
+                {
+                    let v = self.gen_expr(&cargs[0])?;
+                    Ok(Some(format!("({alias}){{ .ok = true, .value = {v} }}")))
+                }
+                Expr::CallExpr {
+                    callee,
+                    args: cargs,
+                } if matches!(&callee.node, Expr::Identifier { name: n } if n == "Err")
+                    && cargs.len() == 1 =>
+                {
+                    let v = self.gen_expr(&cargs[0])?;
+                    Ok(Some(format!("({alias}){{ .ok = false, .error = {v} }}")))
+                }
+                _ => Ok(None),
+            },
+            _ => Ok(None),
+        }
+    }
+
     fn gen_let_stmt(&mut self, name: &str, ty: &TypeNode, value: &Spanned<Expr>) -> XResult<()> {
         if let Expr::ArrayLiteral { elements } = &value.node {
             self.gen_array_let_stmt(name, ty, elements)?;
+        } else if let Some(rendered) = self.try_constructor(ty, value)? {
+            self.emit(&format!("{} {} = {};", self.c_type(ty)?, name, rendered));
         } else {
             self.emit(&format!(
                 "{} {} = {};",

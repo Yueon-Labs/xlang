@@ -41,3 +41,9 @@ jobs:
 
       - name: Run if_else example
         run: make run-if
+
+      - name: Run option demo (construct + match)
+        run: make run-option-demo
+
+      - name: Run result demo (construct + match)
+        run: make run-result-demo
