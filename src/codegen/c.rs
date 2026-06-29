@@ -881,6 +881,17 @@ impl CGen {
             "    out[n] = 0;",
             "    return out;",
             "}",
+            "char* __xlang_str_translate(const char* s, const char* from, const char* to) {",
+            "    int32_t n = (int32_t)strlen(s);",
+            "    int32_t tn = (int32_t)strlen(to);",
+            "    char* out = (char*)malloc(n + 1);",
+            "    for (int32_t i = 0; i < n; i++) {",
+            "        char* p = strchr(from, s[i]);",
+            "        out[i] = (p && (p - from) < tn) ? to[p - from] : s[i];",
+            "    }",
+            "    out[n] = 0;",
+            "    return out;",
+            "}",
             "",
         ];
         for line in lines {
@@ -1001,6 +1012,14 @@ impl CGen {
                 format!("__xlang_str_slice({a}, {b}, {c})")
             }
             "str_reverse" => format!("__xlang_str_reverse({a})"),
+            "str_translate" => {
+                let (Some(second), Some(third)) = (args.get(1), args.get(2)) else {
+                    return Ok(None);
+                };
+                let b = self.gen_expr(second)?;
+                let c = self.gen_expr(third)?;
+                format!("__xlang_str_translate({a}, {b}, {c})")
+            }
             "str_char_at" => {
                 let Some(second) = args.get(1) else {
                     return Ok(None);
