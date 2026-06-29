@@ -7,9 +7,9 @@ fn main(): i32 {
         print_str("usage: seq <last> | <first> <last> | <first> <step> <last>")
         return 1
     }
-    let first: i32 = 1
-    let step: i32 = 1
-    let last: i32 = 0
+    let mut first: i32 = 1
+    let mut step: i32 = 1
+    let mut last: i32 = 0
     if argc() == 2 {
         last = str_to_int(argv(1))
     } else {
