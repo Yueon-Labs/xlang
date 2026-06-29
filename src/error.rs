@@ -2,19 +2,15 @@ use crate::source::Span;
 use serde::Serialize;
 
 // ---------------------------------------------------------------------------
-// Legacy error type (retained during the Phase 1 migration).
-//
-// The `Lex` / `Parse` / `Type` string arms are progressively replaced by the
-// structured `Diagnostic` collector below. They remain until every call site
-// (lexer, parser, typecheck) has migrated, so the project keeps compiling
-// milestone-by-milestone. They are removed again in M5.
+// Fatal error type. Structured diagnostics (lexer / parser / typecheck) flow
+// through the `Diagnostic` collector below; this enum is now only for fatal
+// conditions: legacy `parse_file` failures (Parse), codegen-unsupported
+// (Codegen), and I/O / JSON errors.
 // ---------------------------------------------------------------------------
 
 #[derive(Debug)]
 pub enum XError {
-    Lex(String),
     Parse(String),
-    Type(String),
     Codegen(String),
     Io(std::io::Error),
     Json(serde_json::Error),
@@ -23,9 +19,7 @@ pub enum XError {
 impl std::fmt::Display for XError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            XError::Lex(msg) => write!(f, "lexer error: {msg}"),
             XError::Parse(msg) => write!(f, "parse error: {msg}"),
-            XError::Type(msg) => write!(f, "type error: {msg}"),
             XError::Codegen(msg) => write!(f, "codegen error: {msg}"),
             XError::Io(err) => write!(f, "io error: {err}"),
             XError::Json(err) => write!(f, "json error: {err}"),

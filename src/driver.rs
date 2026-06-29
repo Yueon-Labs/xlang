@@ -349,7 +349,7 @@ impl RunSafeResult {
 
 fn result_from_xerror(err: XError, started: Instant, options: &RunSafeOptions) -> RunSafeResult {
     let status = match &err {
-        XError::Lex(_) | XError::Parse(_) | XError::Type(_) => "check_error",
+        XError::Parse(_) => "check_error",
         XError::Codegen(_) => "codegen_error",
         XError::Io(_) | XError::Json(_) => "error",
     };
