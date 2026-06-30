@@ -85,7 +85,13 @@ fn main(): i32 {
                 if client < 0 {
                     break
                 }
+                // Non-blocking client: fast event loop. Large file bodies go out
+                // via sendfile_fd which retries on EAGAIN (completes in full), so
+                // non-blocking no longer truncates responses. TCP_NODELAY avoids
+                // the Nagle + delayed-ACK 40ms stall (headers + sendfile body are
+                // two sends; without NODELAY the second waits for the first's ACK).
                 set_nonblock(client)
+                set_nodelay(client)
                 epoll_add(client)
             }
         } else {
