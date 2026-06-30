@@ -57,7 +57,8 @@ fn expand_vars(s: String): String {
 }
 
 // Run cmd in a child with stdout to a pipe; parent reads + returns raw output
-// (no sb use, so callers that own the sb buffer are safe).
+// (no sb use, so callers that own the sb buffer are safe). Supports pipelines:
+// the last stage's stdout is the (inherited) capture fd.
 fn capture_cmd_raw(cmd: String): String {
     make_pipe()
     let r: i32 = pipe_read_end()
@@ -67,7 +68,7 @@ fn capture_cmd_raw(cmd: String): String {
         close_fd(r)
         dup2(w, 1)
         close_fd(w)
-        exec_split(cmd)
+        run_child(cmd)
         return ""
     }
     close_fd(w)
@@ -75,6 +76,19 @@ fn capture_cmd_raw(cmd: String): String {
     close_fd(r)
     wait_child()
     return out
+}
+
+// Run a command (single or piped) in the current process's context — used by
+// capture_cmd_raw's child so the LAST pipeline stage writes to the inherited
+// stdout (the capture pipe).
+fn run_child(cmd: String): i32 {
+    let stages: Vec<String> = split_pipe(cmd)
+    if vec_len(stages) > 1 {
+        run_pipeline(stages)
+    } else {
+        exec_split(cmd)
+    }
+    return 0
 }
 
 // Combined expansion in ONE pass (one sb): $(cmd) command substitution AND
@@ -342,7 +356,8 @@ fn run_for(c: String): i32 {
         return 1
     }
     let var: String = str_slice(varlist, 0, in_pos)
-    let list_str: String = strip_trailing_semi(str_slice(varlist, in_pos + 4, str_len(varlist)))
+    let raw_list: String = strip_trailing_semi(str_slice(varlist, in_pos + 4, str_len(varlist)))
+    let list_str: String = expand(raw_list)
     let words: Vec<String> = split_char(list_str, 32)
     let mut i: i32 = 0
     let wc: i32 = vec_len(words)
