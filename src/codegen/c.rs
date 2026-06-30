@@ -1177,6 +1177,15 @@ impl CGen {
             "    memcpy(out, s + start, (size_t)len); out[len] = 0;",
             "    return out;",
             "}",
+            "char* __xlang_str_trim(const char* s) {",
+            "    size_t n = strlen(s), a = 0, b = n;",
+            "    while (a < b && (s[a] == ' ' || s[a] == '\\t' || s[a] == '\\n' || s[a] == '\\r')) a++;",
+            "    while (b > a && (s[b-1] == ' ' || s[b-1] == '\\t' || s[b-1] == '\\n' || s[b-1] == '\\r')) b--;",
+            "    size_t len = b - a;",
+            "    char* out = (char*)malloc(len + 1);",
+            "    memcpy(out, s + a, len); out[len] = 0;",
+            "    return out;",
+            "}",
             "char* __xlang_str_reverse(const char* s) {",
             "    int32_t n = (int32_t)strlen(s);",
             "    char* out = (char*)malloc(n + 1);",
@@ -1618,6 +1627,7 @@ impl CGen {
                 format!("__xlang_str_slice({a}, {b}, {c})")
             }
             "str_reverse" => format!("__xlang_str_reverse({a})"),
+            "str_trim" => format!("__xlang_str_trim({a})"),
             "str_translate" => {
                 let (Some(second), Some(third)) = (args.get(1), args.get(2)) else {
                     return Ok(None);
