@@ -129,7 +129,9 @@ pub fn run_cli() -> XResult<()> {
                 .output()?;
             print!("{}", String::from_utf8_lossy(&out.stdout));
             eprint!("{}", String::from_utf8_lossy(&out.stderr));
-            println!(
+            // Exit-code notice goes to STDERR so `run`'s stdout is exactly the
+            // program's output (lets tests/pipes capture clean program output).
+            eprintln!(
                 "program exited with code {}",
                 out.status.code().unwrap_or(-1)
             );
