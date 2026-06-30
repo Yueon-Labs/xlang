@@ -295,12 +295,16 @@ fn run_executable_safe(
     });
 
     let timeout = Duration::from_millis(options.timeout_ms);
+    // The execution deadline starts when the program launches, NOT from
+    // `started` (run_safe entry) — otherwise slow C compilation on loaded
+    // CI runners eats the whole timeout budget before the program even runs.
+    let exec_started = Instant::now();
     let mut timed_out = false;
     let status = loop {
         if let Some(status) = child.try_wait()? {
             break status;
         }
-        if started.elapsed() >= timeout {
+        if exec_started.elapsed() >= timeout {
             timed_out = true;
             child.kill()?;
             break child.wait()?;
