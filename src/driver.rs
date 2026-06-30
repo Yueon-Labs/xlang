@@ -62,24 +62,28 @@ struct CapturedOutput {
 /// was produced. Only fatal I/O errors propagate via `XResult`.
 pub fn parse_collecting(path: &Path) -> XResult<(Option<Program>, String, Diagnostics)> {
     let source = fs::read_to_string(path)?;
+    let (program, diags) = parse_source(&source, &path.display().to_string());
+    Ok((program, source, diags))
+}
+
+/// Like [`parse_collecting`] but takes source text directly (for the LSP server,
+/// which holds document text in memory rather than reading a file). Returns the
+/// parsed program (if any) plus all accumulated diagnostics.
+pub fn parse_source(source: &str, file: &str) -> (Option<Program>, Diagnostics) {
     let mut diags = Diagnostics::new();
-
-    let (tokens, lex_diags) = Lexer::new(&source).tokenize();
+    let (tokens, lex_diags) = Lexer::new(source).tokenize();
     diags.extend(lex_diags);
-
-    let program = match Parser::new(tokens, path.display().to_string()).parse() {
+    let program = match Parser::new(tokens, file.to_string()).parse() {
         Ok(program) => Some(program),
         Err(diag) => {
             diags.push(diag);
             None
         }
     };
-
     if let Some(program) = &program {
         diags.extend(check_program(program));
     }
-
-    Ok((program, source, diags))
+    (program, diags)
 }
 
 /// Legacy single-program entry point for codegen paths: returns the program

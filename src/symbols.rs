@@ -9,7 +9,7 @@ use crate::ast::{Item, TypeNode};
 use crate::source::{LineIndex, Span, Spanned};
 
 /// 1-based source range (line/col..endLine/endCol), LSP-style.
-#[derive(Serialize)]
+#[derive(Clone, Serialize)]
 pub struct Range {
     pub line: u32,
     pub col: u32,
