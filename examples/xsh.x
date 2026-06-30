@@ -56,6 +56,107 @@ fn expand_vars(s: String): String {
     return sb_str()
 }
 
+// Run cmd in a child with stdout to a pipe; parent reads + returns raw output
+// (no sb use, so callers that own the sb buffer are safe).
+fn capture_cmd_raw(cmd: String): String {
+    make_pipe()
+    let r: i32 = pipe_read_end()
+    let w: i32 = pipe_write_end()
+    let pid: i32 = fork()
+    if pid == 0 {
+        close_fd(r)
+        dup2(w, 1)
+        close_fd(w)
+        exec_split(cmd)
+        return ""
+    }
+    close_fd(w)
+    let out: String = read_fd(r)
+    close_fd(r)
+    wait_child()
+    return out
+}
+
+// Combined expansion in ONE pass (one sb): $(cmd) command substitution AND
+// $VAR. Doing both in one scan avoids the two-sb-pass conflict (each pass
+// resets the global sb buffer).
+fn expand(s: String): String {
+    let n: i32 = str_len(s)
+    sb_new()
+    let mut i: i32 = 0
+    while i < n {
+        let c: i32 = str_char_at(s, i)
+        if c == 36 {
+            if i + 1 < n {
+                if str_char_at(s, i + 1) == 40 {
+                    let mut depth: i32 = 1
+                    let mut j: i32 = i + 2
+                    while j < n {
+                        let cc: i32 = str_char_at(s, j)
+                        if cc == 40 {
+                            depth = depth + 1
+                        }
+                        if cc == 41 {
+                            depth = depth - 1
+                            if depth == 0 {
+                                break
+                            }
+                        }
+                        j = j + 1
+                    }
+                    if depth == 0 {
+                        let out: String = capture_cmd_raw(str_slice(s, i + 2, j))
+                        let on: i32 = str_len(out)
+                        let mut oend: i32 = on
+                        if oend > 0 {
+                            if str_char_at(out, oend - 1) == 10 {
+                                oend = oend - 1
+                            }
+                        }
+                        let mut k: i32 = 0
+                        while k < oend {
+                            let oc: i32 = str_char_at(out, k)
+                            if oc == 10 {
+                                sb_push_char(32)
+                            } else {
+                                sb_push_char(oc)
+                            }
+                            k = k + 1
+                        }
+                        i = j + 1
+                    } else {
+                        sb_push_char(36)
+                        i = i + 1
+                    }
+                } else {
+                    if is_name_start(str_char_at(s, i + 1)) {
+                        let mut k: i32 = i + 2
+                        while k < n {
+                            if is_name_char(str_char_at(s, k)) {
+                                k = k + 1
+                            } else {
+                                break
+                            }
+                        }
+                        sb_push(getenv(str_slice(s, i + 1, k)))
+                        i = k
+                    } else {
+                        sb_push_char(36)
+                        i = i + 1
+                    }
+                }
+            } else {
+                sb_push_char(36)
+                i = i + 1
+            }
+        } else {
+            sb_push_char(c)
+            i = i + 1
+        }
+    }
+    return sb_str()
+}
+
 fn split_char(s: String, sep: i32): Vec<String> {
     let v: Vec<String> = vec_new()
     let n: i32 = str_len(s)
@@ -264,7 +365,7 @@ fn run_command(cmd: String): i32 {
             return run_for(cmd)
         }
     }
-    let c: String = trim(expand_vars(cmd))
+    let c: String = trim(expand(cmd))
     if str_len(c) == 0 {
         return 0
     }
