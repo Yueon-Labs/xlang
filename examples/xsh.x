@@ -414,6 +414,118 @@ fn run_while(c: String): i32 {
     return 0
 }
 
+// test / [ ... ] — evaluate a condition, return 0 (true) or 1 (false).
+// Forms: -f/-d/-e/-z/-n ARG  (1 op),  A -lt/-gt/-eq/-ne/-le/-ge/= /!= B  (2 op).
+fn run_test(s: String): i32 {
+    let toks: Vec<String> = split_char(trim(s), 32)
+    let mut args: Vec<String> = vec_new()
+    let mut t: i32 = 0
+    while t < vec_len(toks) {
+        let tk: String = trim(toks[t])
+        if str_len(tk) > 0 {
+            args.push(tk)
+        }
+        t = t + 1
+    }
+    let n: i32 = vec_len(args)
+    if n == 2 {
+        let op: String = args[0]
+        let a: String = args[1]
+        if str_eq(op, "-f") {
+            if file_exists(a) {
+                return 0
+            }
+            return 1
+        }
+        if str_eq(op, "-d") {
+            if is_dir(a) {
+                return 0
+            }
+            return 1
+        }
+        if str_eq(op, "-e") {
+            if file_exists(a) {
+                return 0
+            }
+            return 1
+        }
+        if str_eq(op, "-z") {
+            if str_len(a) == 0 {
+                return 0
+            }
+            return 1
+        }
+        if str_eq(op, "-n") {
+            if str_len(a) > 0 {
+                return 0
+            }
+            return 1
+        }
+        return 1
+    }
+    if n == 3 {
+        let a: String = args[0]
+        let op: String = args[1]
+        let b: String = args[2]
+        if str_eq(op, "-lt") {
+            if str_to_int(a) < str_to_int(b) {
+                return 0
+            }
+            return 1
+        }
+        if str_eq(op, "-gt") {
+            if str_to_int(a) > str_to_int(b) {
+                return 0
+            }
+            return 1
+        }
+        if str_eq(op, "-le") {
+            if str_to_int(a) <= str_to_int(b) {
+                return 0
+            }
+            return 1
+        }
+        if str_eq(op, "-ge") {
+            if str_to_int(a) >= str_to_int(b) {
+                return 0
+            }
+            return 1
+        }
+        if str_eq(op, "-eq") {
+            if str_to_int(a) == str_to_int(b) {
+                return 0
+            }
+            return 1
+        }
+        if str_eq(op, "-ne") {
+            if str_to_int(a) != str_to_int(b) {
+                return 0
+            }
+            return 1
+        }
+        if str_eq(op, "=") {
+            if str_eq(a, b) {
+                return 0
+            }
+            return 1
+        }
+        if str_eq(op, "==") {
+            if str_eq(a, b) {
+                return 0
+            }
+            return 1
+        }
+        if str_eq(op, "!=") {
+            if !str_eq(a, b) {
+                return 0
+            }
+            return 1
+        }
+        return 1
+    }
+    return 1
+}
+
 fn run_command(cmd: String): i32 {
     // Control-flow constructs are handled on the RAW line (before $VAR
     // expansion), so their bodies re-expand per execution.
@@ -435,6 +547,17 @@ fn run_command(cmd: String): i32 {
     let c: String = trim(expand(cmd))
     if str_len(c) == 0 {
         return 0
+    }
+    // test / [ ... ] — returns 0 (true) or 1 (false); checked before pipes so
+    // `[ a -lt b ]` is a condition, not a redirect.
+    if str_char_at(c, 0) == 91 {
+        let close: i32 = str_find(c, "]")
+        if close > 0 {
+            return run_test(str_slice(c, 1, close))
+        }
+    }
+    if str_find(c, "test ") == 0 {
+        return run_test(str_slice(c, 5, str_len(c)))
     }
     // Pipes / redirects take precedence over builtins, so `echo x | grep` pipes
     // and `echo x > f` redirects (rather than hitting the echo builtin).
