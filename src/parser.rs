@@ -22,24 +22,81 @@ impl Parser {
         }
     }
 
+    /// Parse, returning the first error (or the program). The recovering
+    /// variant below is preferred for tooling (it reports ALL errors); this
+    /// single-error form is kept as a convenience Result API.
+    #[allow(dead_code)]
     pub fn parse(&mut self) -> Result<Program, Diagnostic> {
-        let module = self.parse_module_decl()?;
+        let (prog, diags) = self.parse_recovering();
+        match diags.into_iter().next() {
+            Some(d) => Err(d),
+            None => Ok(prog),
+        }
+    }
+
+    /// Parse with error recovery at the item boundary: a failed
+    /// module/import/item is recorded and the cursor skips to the next
+    /// `fn`/`struct`/`type`/`import` (a synchronization point), so ALL syntax
+    /// errors in a file are reported (not just the first). Returns the
+    /// best-effort parsed program plus every diagnostic.
+    pub fn parse_recovering(&mut self) -> (Program, Vec<Diagnostic>) {
+        let mut diags: Vec<Diagnostic> = Vec::new();
+        let module = match self.parse_module_decl() {
+            Ok(m) => m,
+            Err(d) => {
+                diags.push(d);
+                self.skip_to_item();
+                ModuleDecl {
+                    kind: "ModuleDecl",
+                    path: vec!["main".to_string()],
+                }
+            }
+        };
         let mut imports = Vec::new();
         while self.check("import") {
-            imports.push(self.parse_import_decl()?);
+            match self.parse_import_decl() {
+                Ok(im) => imports.push(im),
+                Err(d) => {
+                    diags.push(d);
+                    self.skip_to_item();
+                }
+            }
         }
-
         let mut items = Vec::new();
         while !self.is_eof() {
-            items.push(self.parse_item()?);
+            match self.parse_item() {
+                Ok(item) => items.push(item),
+                Err(d) => {
+                    diags.push(d);
+                    self.skip_to_item();
+                }
+            }
         }
+        (
+            Program {
+                kind: "Program",
+                module,
+                imports,
+                items,
+            },
+            diags,
+        )
+    }
 
-        Ok(Program {
-            kind: "Program",
-            module,
-            imports,
-            items,
-        })
+    /// Advance past the current (errored) token, then skip to the next item
+    /// synchronization point (`fn` / `struct` / `type` / `import`) or EOF.
+    fn skip_to_item(&mut self) {
+        self.bump();
+        while !self.is_eof() {
+            if self.check("fn")
+                || self.check("struct")
+                || self.check("type")
+                || self.check("import")
+            {
+                return;
+            }
+            self.bump();
+        }
     }
 
     fn peek(&self) -> &Token {
@@ -706,4 +763,32 @@ fn binary(op: impl Into<String>, left: Spanned<Expr>, right: Spanned<Expr>) -> S
         },
         span,
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::lexer::Lexer;
+
+    #[test]
+    fn parse_recovering_reports_multiple_errors() {
+        // Two malformed fn decls with a good one between; recovery reports BOTH
+        // errors (old behavior bailed at the first) and still parses the good fn.
+        let src = "module main\nfn good(): i32 {\n    return 0\n}\nfn bad1(: i32 {\n}\nfn bad2 : i32 {\n}\n";
+        let (tokens, _) = Lexer::new(src).tokenize();
+        let (prog, diags) = Parser::new(tokens, "<t>").parse_recovering();
+        assert!(
+            diags.len() >= 2,
+            "expected >=2 diagnostics, got {}",
+            diags.len()
+        );
+        let good_parsed = prog
+            .items
+            .iter()
+            .any(|i| matches!(&i.node, Item::FnDecl { name, .. } if name == "good"));
+        assert!(
+            good_parsed,
+            "the good fn should still parse despite surrounding errors"
+        );
+    }
 }

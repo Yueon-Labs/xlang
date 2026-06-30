@@ -73,17 +73,12 @@ pub fn parse_source(source: &str, file: &str) -> (Option<Program>, Diagnostics) 
     let mut diags = Diagnostics::new();
     let (tokens, lex_diags) = Lexer::new(source).tokenize();
     diags.extend(lex_diags);
-    let program = match Parser::new(tokens, file.to_string()).parse() {
-        Ok(program) => Some(program),
-        Err(diag) => {
-            diags.push(diag);
-            None
-        }
-    };
-    if let Some(program) = &program {
-        diags.extend(check_program(program));
-    }
-    (program, diags)
+    // Recovering parse: reports ALL syntax errors and returns the best-effort
+    // (partial) program so hover/completion still work on the parts that parsed.
+    let (program, parse_diags) = Parser::new(tokens, file.to_string()).parse_recovering();
+    diags.extend(Diagnostics { items: parse_diags });
+    diags.extend(check_program(&program));
+    (Some(program), diags)
 }
 
 /// Legacy single-program entry point for codegen paths: returns the program
