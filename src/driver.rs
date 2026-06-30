@@ -17,6 +17,38 @@ use crate::typecheck::check_program;
 const DEFAULT_RUN_SAFE_TIMEOUT_MS: u64 = 2_000;
 const DEFAULT_RUN_SAFE_OUTPUT_LIMIT_BYTES: usize = 64 * 1024;
 
+/// Resolve the system C compiler. Tries the candidates in order and returns the
+/// first one that runs successfully (probing with `--version`). This lets xlang
+/// build on platforms where `cc` is absent (e.g. Windows/MinGW has `gcc`, macOS
+/// may have only `clang`). The chosen binary is cached so we only probe once.
+fn pick_cc() -> String {
+    if let Ok(v) = std::env::var("XLANG_CC") {
+        if !v.is_empty() {
+            return v;
+        }
+    }
+    // Cache the probe result for the process lifetime.
+    if let Some(c) = CC_CACHE.get() {
+        return c.clone();
+    }
+    for cand in ["cc", "gcc", "clang", "clang-17", "gcc-14"] {
+        if let Ok(out) = Command::new(cand).arg("--version").output() {
+            if out.status.success() {
+                CC_CACHE.set(cand.to_string()).ok();
+                return cand.to_string();
+            }
+        }
+    }
+    // Fall back to "cc"; the later Command will fail with a clear-ish error.
+    CC_CACHE.set("cc".to_string()).ok();
+    "cc".to_string()
+}
+
+// Once-cell cache for the chosen compiler (std-only; std::sync::OnceLock is
+// stable since 1.70). We use it so repeated `run`/`run-safe` calls don't each
+// fork a `cc --version` probe.
+static CC_CACHE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+
 #[derive(Clone, Debug)]
 pub struct RunSafeOptions {
     pub timeout_ms: u64,
@@ -252,8 +284,8 @@ pub fn build_exe(source: &Path, output: Option<PathBuf>) -> XResult<PathBuf> {
     let stem = source.file_stem().unwrap_or_default().to_string_lossy();
     let c_path = PathBuf::from("build").join(format!("{stem}.c"));
     write_c(source, Some(c_path.clone()))?;
-    let exe = output.unwrap_or_else(|| PathBuf::from("build").join(stem.as_ref()));
-    let out = Command::new("cc")
+    let exe = output.unwrap_or_else(|| PathBuf::from("build").join(exe_name(&stem)));
+    let out = Command::new(pick_cc())
         .arg(&c_path)
         .arg("-o")
         .arg(&exe)
@@ -265,7 +297,14 @@ pub fn build_exe(source: &Path, output: Option<PathBuf>) -> XResult<PathBuf> {
             out.status.code()
         )));
     }
-    Ok(exe)
+    // On Windows, `cc -o build/foo.exe` produces exactly that file; but if a
+    // caller passed `-o foo` (no extension) gcc still appends `.exe`. Resolve
+    // to the real on-disk path so the caller's canonicalize/exec works.
+    if exe.exists() {
+        Ok(exe)
+    } else {
+        Ok(PathBuf::from(format!("{}.exe", exe.display())))
+    }
 }
 
 pub fn run_safe(source: &Path, options: RunSafeOptions) -> XResult<RunSafeResult> {
@@ -291,7 +330,7 @@ fn run_safe_in_dir(
         return Ok(result_from_xerror(err, started, options));
     }
 
-    let compile_out = match Command::new("cc")
+    let compile_out = match Command::new(pick_cc())
         .arg(&c_path)
         .arg("-o")
         .arg(&exe_path)
