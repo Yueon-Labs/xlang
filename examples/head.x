@@ -1,46 +1,64 @@
 module main
 
-// head [N] [file] — first N lines (default 10, like GNU head -n N). stdin if
-// no file. N is detected by first-char-is-digit.
+// head [-n N | -N] [file] — first N lines (default 10), GNU-compatible flags.
+// Handles `head -3 f`, `head -n 3 f`, `head -n3 f`, `head f`, `head N f`.
 fn main(): i32 {
     let mut limit: i32 = 10
-    let mut file_idx: i32 = 0
-    if argc() >= 2 {
-        let first: i32 = str_char_at(argv(1), 0)
-        if first >= 48 {
-            if first <= 57 {
-                limit = str_to_int(argv(1))
-                if argc() >= 3 {
-                    file_idx = 2
+    let mut file: String = ""
+    let mut i: i32 = 1
+    while i < argc() {
+        let a: String = argv(i)
+        let c0: i32 = str_char_at(a, 0)
+        if c0 == 45 {
+            let c1: i32 = str_char_at(a, 1)
+            if c1 == 110 {
+                if str_len(a) > 2 {
+                    limit = str_to_int(str_slice(a, 2, str_len(a)))
+                } else {
+                    i = i + 1
+                    if i < argc() {
+                        limit = str_to_int(argv(i))
+                    }
                 }
             } else {
-                file_idx = 1
+                if c1 >= 48 {
+                    if c1 <= 57 {
+                        limit = str_to_int(str_slice(a, 1, str_len(a)))
+                    }
+                }
             }
         } else {
-            file_idx = 1
+            if c0 >= 48 {
+                if c0 <= 57 {
+                    limit = str_to_int(a)
+                }
+            } else {
+                file = a
+            }
         }
+        i = i + 1
     }
     let mut s: String = ""
-    if file_idx > 0 {
-        s = read_file(argv(file_idx))
+    if str_len(file) > 0 {
+        s = read_file(file)
     } else {
         s = read_stdin()
     }
     let n: i32 = str_len(s)
     let mut printed: i32 = 0
     let mut start: i32 = 0
-    let mut i: i32 = 0
-    while i < n {
-        if str_char_at(s, i) == 10 {
-            print_raw(str_slice(s, start, i))
+    let mut k: i32 = 0
+    while k < n {
+        if str_char_at(s, k) == 10 {
+            print_raw(str_slice(s, start, k))
             print_raw("\n")
-            printed += 1
-            start = i + 1
+            printed = printed + 1
+            start = k + 1
             if printed >= limit {
                 return 0
             }
         }
-        i += 1
+        k = k + 1
     }
     if start < n {
         if printed < limit {

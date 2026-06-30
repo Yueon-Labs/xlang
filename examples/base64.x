@@ -16,12 +16,25 @@ fn b64_val(c: i32): i32 {
 
 fn main(): i32 {
     let mut decode: bool = false
-    if argc() >= 2 {
-        if str_eq(argv(1), "-d") {
+    let mut file: String = ""
+    let mut i: i32 = 1
+    while i < argc() {
+        let a: String = argv(i)
+        if str_eq(a, "-d") {
             decode = true
+        } else {
+            if str_char_at(a, 0) != 45 {
+                file = a
+            }
         }
+        i = i + 1
     }
-    let s: String = read_stdin()
+    let mut s: String = ""
+    if str_len(file) > 0 {
+        s = read_file(file)
+    } else {
+        s = read_stdin()
+    }
     let n: i32 = str_len(s)
     sb_new()
     if decode {
