@@ -2,7 +2,8 @@ module main
 
 // tr [-d] <set1> [set2] [file] — translate or delete characters.
 // -d: delete all chars in set1. Without -d: translate set1→set2.
-// Uses sb_push for O(n) output in delete mode.
+// Delete mode builds a 256-entry lookup table (O(1) per char) and emits via
+// sb_push_char (zero-alloc). Translate mode uses the O(n) str_translate builtin.
 fn main(): i32 {
     let mut s: String = ""
     let mut delete_mode: bool = false
@@ -41,21 +42,24 @@ fn main(): i32 {
     }
 
     if delete_mode {
-        let n: i32 = str_len(s)
+        let table: Vec<i32> = vec_new()
+        let mut k: i32 = 0
+        while k < 256 {
+            table.push(0)
+            k += 1
+        }
         let sn: i32 = str_len(set1)
+        let mut j: i32 = 0
+        while j < sn {
+            table[str_char_at(set1, j)] = 1
+            j += 1
+        }
+        let n: i32 = str_len(s)
         let mut i: i32 = 0
         sb_new()
         while i < n {
             let c: i32 = str_char_at(s, i)
-            let mut in_set: bool = false
-            let mut j: i32 = 0
-            while j < sn {
-                if str_char_at(set1, j) == c {
-                    in_set = true
-                }
-                j += 1
-            }
-            if !in_set {
+            if table[c] == 0 {
                 sb_push_char(c)
             }
             i += 1
