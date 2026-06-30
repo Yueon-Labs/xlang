@@ -708,9 +708,30 @@ fn run_command(cmd: String): i32 {
             return run_while(cmd)
         }
     }
+    // Function definition: name() { body }  → store in env (before expand).
+    if str_find(cmd, "() {") >= 0 {
+        let paren: i32 = str_find(cmd, "() {")
+        let name: String = trim(str_slice(cmd, 0, paren))
+        let brace: i32 = str_find(cmd, "{")
+        let body: String = trim(str_slice(cmd, brace + 1, str_len(cmd) - 1))
+        if str_len(name) > 0 {
+            setenv(str_concat("__xlang_func_", name), body)
+        }
+        return 0
+    }
     let c: String = trim(expand(cmd))
     if str_len(c) == 0 {
         return 0
+    }
+    // Function call: if the first word matches a defined function, run its body.
+    let mut sp: i32 = str_find(c, " ")
+    if sp < 0 {
+        sp = str_len(c)
+    }
+    let fw: String = str_slice(c, 0, sp)
+    let fbody: String = getenv(str_concat("__xlang_func_", fw))
+    if str_len(fbody) > 0 {
+        return run_body(fbody)
     }
     // Compound commands: split at the FIRST `&&` or `||`, short-circuit.
     // (left has no operator after the first split, so recursion terminates.)
@@ -841,6 +862,11 @@ fn main(): i32 {
                 run_while(cmd)
                 continue
             }
+        }
+        // Function definitions contain ';' inside {} — bypass the ';' split.
+        if str_find(cmd, "() {") >= 0 {
+            run_command(cmd)
+            continue
         }
         // Split raw line on ';'. Variable expansion is per-command (deferred to
         // run_command), so `X=hi; echo $X` sees X set before $X expands.
