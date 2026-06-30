@@ -8,7 +8,7 @@
 use serde::{Serialize, Serializer};
 
 /// Byte range in a source file. `start` is inclusive, `end` exclusive.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize)]
 pub struct Span {
     pub file_id: u32,
     pub start: u32,

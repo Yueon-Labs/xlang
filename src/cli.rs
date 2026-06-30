@@ -4,8 +4,8 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use crate::driver::{
-    RunSafeOptions, build_exe, diagnostics_to_gcc, diagnostics_to_serializable, parse_collecting,
-    parse_file, run_safe, write_c,
+    RunSafeOptions, apply_suggestions, build_exe, diagnostics_to_gcc, diagnostics_to_serializable,
+    parse_collecting, parse_file, run_safe, suggestion_count, write_c,
 };
 use crate::error::{XError, XResult};
 use crate::symbols;
@@ -21,6 +21,7 @@ pub fn run_cli() -> XResult<()> {
     match cmd.as_str() {
         "check" => {
             let mut format_json = false;
+            let mut fix = false;
             let mut files: Vec<String> = Vec::new();
             let mut i = 0;
             while i < args.len() {
@@ -31,12 +32,16 @@ pub fn run_cli() -> XResult<()> {
                             i += 2;
                         } else {
                             return Err(XError::Parse(
-                                "usage: xlangc check <files...> [--format json]".into(),
+                                "usage: xlangc check <files...> [--format json] [--fix]".into(),
                             ));
                         }
                     }
                     "--format=json" => {
                         format_json = true;
+                        i += 1;
+                    }
+                    "--fix" => {
+                        fix = true;
                         i += 1;
                     }
                     other => {
@@ -47,7 +52,7 @@ pub fn run_cli() -> XResult<()> {
             }
             if files.is_empty() {
                 return Err(XError::Parse(
-                    "usage: xlangc check <files...> [--format json]".into(),
+                    "usage: xlangc check <files...> [--format json] [--fix]".into(),
                 ));
             }
 
@@ -55,6 +60,27 @@ pub fn run_cli() -> XResult<()> {
             let mut all: Vec<_> = Vec::new();
             for file in &files {
                 let (_program, source, diags) = parse_collecting(Path::new(file.as_str()))?;
+                if fix {
+                    let n = suggestion_count(&diags);
+                    if n > 0 {
+                        let fixed = apply_suggestions(&source, &diags);
+                        fs::write(file, fixed)?;
+                        println!(
+                            "[fixed] {file} ({} suggestion{})",
+                            n,
+                            if n == 1 { "" } else { "s" }
+                        );
+                    } else if diags.is_empty() {
+                        println!("[ok] {file}");
+                    }
+                    // after --fix, still surface remaining (unfixed) diagnostics
+                    if !diags.is_empty() {
+                        for line in diagnostics_to_gcc(&diags, &source, file) {
+                            eprintln!("{line}");
+                        }
+                    }
+                    continue;
+                }
                 if diags.is_empty() {
                     if !format_json {
                         println!("[ok] {file}");
@@ -165,7 +191,7 @@ fn print_help() {
     println!(
         "xlangc - minimal X Language compiler prototype\n\n\
          Commands:\n\
-           xlangc check <files...> [--format json]  Check and report diagnostics\n\
+           xlangc check <files...> [--format json] [--fix]  Check / report diagnostics / apply autofixes\n\
            xlangc ast <file>              Print JSON AST\n\
            xlangc symbols <file>          Print JSON symbol index (for LSP)\n\
            xlangc c <file> [-o out.c]     Generate C for supported subset\n\

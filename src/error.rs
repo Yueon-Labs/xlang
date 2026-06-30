@@ -119,7 +119,8 @@ pub enum ErrorCode {
 
 /// A single structured diagnostic. `span` is a byte range (converted to
 /// line/col by the output layer via [`crate::source::LineIndex`]);
-/// `suggestions` (LSP `TextEdit`s) are added in Phase 2 as the autofix surface.
+/// `suggestions` are machine-applicable `TextEdit` fixes (the autofix surface:
+/// `check --fix` applies them).
 #[derive(Clone, Debug)]
 pub struct Diagnostic {
     pub severity: Severity,
@@ -128,6 +129,16 @@ pub struct Diagnostic {
     pub span: Span,
     pub source: &'static str,
     pub notes: Vec<String>,
+    pub suggestions: Vec<TextEdit>,
+}
+
+/// A machine-applicable fix: replace the byte range `range` with `new_text`.
+/// A zero-width range inserts; `check --fix` and a future LSP apply these.
+#[derive(Clone, Debug, Serialize)]
+pub struct TextEdit {
+    pub range: Span,
+    #[serde(rename = "newText")]
+    pub new_text: String,
 }
 
 impl Diagnostic {
@@ -144,6 +155,7 @@ impl Diagnostic {
             span,
             source: "xlang",
             notes: Vec::new(),
+            suggestions: Vec::new(),
         }
     }
 
@@ -154,6 +166,15 @@ impl Diagnostic {
     #[allow(dead_code)]
     pub fn with_note(mut self, note: impl Into<String>) -> Self {
         self.notes.push(note.into());
+        self
+    }
+
+    /// Attach a machine-applicable fix. `check --fix` applies suggestions.
+    pub fn with_suggestion(mut self, range: Span, new_text: impl Into<String>) -> Self {
+        self.suggestions.push(TextEdit {
+            range,
+            new_text: new_text.into(),
+        });
         self
     }
 }

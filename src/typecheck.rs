@@ -21,6 +21,9 @@ enum CheckedType {
 struct VarInfo {
     mutable: bool,
     ty: CheckedType,
+    /// Where the variable was declared — used to build autofix suggestions
+    /// (e.g. insert `mut` for an immutable-assign error).
+    decl_span: Span,
 }
 
 #[derive(Clone, Debug)]
@@ -104,7 +107,12 @@ impl Checker {
                 self.push_scope();
                 self.return_types.push(type_from_node(return_type));
                 for param in params {
-                    self.declare(&param.name, false, type_from_node(&param.ty));
+                    self.declare(
+                        &param.name,
+                        false,
+                        type_from_node(&param.ty),
+                        Span::unknown(0),
+                    );
                 }
                 self.check_statements(&body.statements);
                 self.return_types.pop();
@@ -121,9 +129,16 @@ impl Checker {
         self.scopes.pop();
     }
 
-    fn declare(&mut self, name: &str, mutable: bool, ty: CheckedType) {
+    fn declare(&mut self, name: &str, mutable: bool, ty: CheckedType, decl_span: Span) {
         if let Some(scope) = self.scopes.last_mut() {
-            scope.insert(name.to_string(), VarInfo { mutable, ty });
+            scope.insert(
+                name.to_string(),
+                VarInfo {
+                    mutable,
+                    ty,
+                    decl_span,
+                },
+            );
         }
     }
 
@@ -169,7 +184,7 @@ impl Checker {
                     &format!("initializer for variable {name:?}"),
                     value.span,
                 );
-                self.declare(name, *mutable, declared);
+                self.declare(name, *mutable, declared, stmt.span);
             }
             Stmt::IfStmt {
                 condition,
@@ -215,7 +230,7 @@ impl Checker {
                     }
                 };
                 self.push_scope();
-                self.declare(iterator, false, iterator_ty);
+                self.declare(iterator, false, iterator_ty, stmt.span);
                 self.check_statements(&body.statements);
                 self.pop_scope();
             }
@@ -230,7 +245,7 @@ impl Checker {
                     self.push_scope();
                     let Pattern::VariantPattern { bindings, .. } = &arm.pattern;
                     for binding in bindings {
-                        self.declare(binding, false, CheckedType::Unknown);
+                        self.declare(binding, false, CheckedType::Unknown, stmt.span);
                     }
                     self.check_statements(&arm.body.statements);
                     self.pop_scope();
@@ -498,14 +513,24 @@ impl Checker {
                 Some(VarInfo {
                     mutable: true, ty, ..
                 }) => ty,
-                Some(VarInfo { mutable: false, .. }) => {
-                    self.emit(
-                        span,
+                Some(VarInfo {
+                    mutable: false,
+                    decl_span,
+                    ..
+                }) => {
+                    let mut d = Diagnostic::error(
                         ErrorCode::TypeImmutableAssign,
+                        span,
                         format!(
                             "cannot assign to immutable variable {name:?}; declare it with `let mut {name}` if reassignment is intended"
                         ),
                     );
+                    // Autofix: insert `mut ` right after the `let ` keyword in the
+                    // variable's declaration (decl_span starts at `let`, +4 bytes).
+                    let insert_at =
+                        Span::new(decl_span.file_id, decl_span.start + 4, decl_span.start + 4);
+                    d = d.with_suggestion(insert_at, "mut ");
+                    self.diags.push(d);
                     CheckedType::Unknown
                 }
                 None => {
@@ -778,7 +803,7 @@ fn is_builtin_variant(name: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::check_program;
-    use crate::error::Diagnostics;
+    use crate::error::{Diagnostics, ErrorCode};
     use crate::lexer::Lexer;
     use crate::parser::Parser;
 
@@ -810,6 +835,34 @@ fn main(): i32 {
 "#,
         );
         assert!(first_message(&diags).contains("cannot assign to immutable variable \"x\""));
+    }
+
+    #[test]
+    fn immutable_assign_carries_let_mut_autofix() {
+        let diags = check_source(
+            r#"
+module main
+
+fn main(): i32 {
+    let x: i32 = 1
+    x = 2
+    return x
+}
+"#,
+        );
+        let d = diags
+            .items
+            .iter()
+            .find(|d| d.code == ErrorCode::TypeImmutableAssign)
+            .expect("immutable-assign diagnostic");
+        assert_eq!(
+            d.suggestions.len(),
+            1,
+            "should carry one autofix suggestion"
+        );
+        assert_eq!(d.suggestions[0].new_text, "mut ");
+        // The insert point is a zero-width range right after `let `.
+        assert_eq!(d.suggestions[0].range.start, d.suggestions[0].range.end);
     }
 
     #[test]

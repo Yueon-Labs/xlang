@@ -8,7 +8,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use crate::ast::Program;
 use crate::codegen::c::CGen;
-use crate::error::{Diagnostics, ErrorCode, Severity, XError, XResult};
+use crate::error::{Diagnostics, ErrorCode, Severity, TextEdit, XError, XResult};
 use crate::lexer::Lexer;
 use crate::parser::Parser;
 use crate::source::LineIndex;
@@ -109,6 +109,7 @@ pub struct SerializableDiagnostic {
     pub message: String,
     pub file: String,
     pub range: SerializableRange,
+    pub suggestions: Vec<SerializableTextEdit>,
 }
 
 #[derive(Debug, Serialize)]
@@ -120,6 +121,14 @@ pub struct SerializableRange {
     pub end_col: usize,
     pub start: u32,
     pub end: u32,
+}
+
+/// A machine-applicable fix in JSON output: replace `range` with `newText`.
+#[derive(Debug, Serialize)]
+pub struct SerializableTextEdit {
+    pub range: SerializableRange,
+    #[serde(rename = "newText")]
+    pub new_text: String,
 }
 
 /// Convert accumulated diagnostics to serializable form, resolving byte spans
@@ -137,6 +146,26 @@ pub fn diagnostics_to_serializable(
             let (line, col) = index.line_col(d.span.start);
             let end_offset = d.span.end.saturating_sub(1).max(d.span.start);
             let (end_line, end_col) = index.line_col(end_offset);
+            let suggestions = d
+                .suggestions
+                .iter()
+                .map(|s| {
+                    let (sl, sc) = index.line_col(s.range.start);
+                    let seo = s.range.end.saturating_sub(1).max(s.range.start);
+                    let (sel, sec) = index.line_col(seo);
+                    SerializableTextEdit {
+                        range: SerializableRange {
+                            line: sl,
+                            col: sc,
+                            end_line: sel,
+                            end_col: sec,
+                            start: s.range.start,
+                            end: s.range.end,
+                        },
+                        new_text: s.new_text.clone(),
+                    }
+                })
+                .collect();
             SerializableDiagnostic {
                 severity: d.severity,
                 code: d.code,
@@ -150,9 +179,36 @@ pub fn diagnostics_to_serializable(
                     start: d.span.start,
                     end: d.span.end,
                 },
+                suggestions,
             }
         })
         .collect()
+}
+
+/// Apply all `suggestions` from `diags` to `source`, returning the fixed text.
+/// Edits are applied right-to-left (sorted by start descending) so earlier byte
+/// offsets stay valid. Clamped to be safe against out-of-range edits.
+pub fn apply_suggestions(source: &str, diags: &Diagnostics) -> String {
+    let mut edits: Vec<&TextEdit> = diags
+        .items
+        .iter()
+        .flat_map(|d| d.suggestions.iter())
+        .collect();
+    edits.sort_by_key(|e| std::cmp::Reverse(e.range.start));
+    let mut out: Vec<u8> = source.as_bytes().to_vec();
+    for edit in edits {
+        let s = edit.range.start as usize;
+        let e = edit.range.end as usize;
+        if s <= out.len() && e <= out.len() && s <= e {
+            out.splice(s..e, edit.new_text.as_bytes().iter().copied());
+        }
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
+/// Count the total machine-applicable suggestions across all diagnostics.
+pub fn suggestion_count(diags: &Diagnostics) -> usize {
+    diags.items.iter().map(|d| d.suggestions.len()).sum()
 }
 
 /// gcc-style lines: `file:line:col: severity[code]: message`.
