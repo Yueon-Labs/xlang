@@ -1661,6 +1661,31 @@ impl CGen {
             "    struct stat st;",
             "    return stat(path, &st) == 0 ? 1 : 0;",
             "}",
+            "// One stat(2) field by selector (so ls -l needs only one builtin):",
+            "// 0=mode, 1=nlink, 2=uid, 3=gid, 4=size, 5=mtime. -1 on error.",
+            "int32_t __xlang_stat_field(const char* path, int32_t field) {",
+            "    struct stat st;",
+            "    if (stat(path, &st) != 0) return -1;",
+            "    switch (field) {",
+            "        case 0: return (int32_t)st.st_mode;",
+            "        case 1: return (int32_t)st.st_nlink;",
+            "        case 2: return (int32_t)st.st_uid;",
+            "        case 3: return (int32_t)st.st_gid;",
+            "        case 4: return (int32_t)st.st_size;",
+            "        case 5: return (int32_t)st.st_mtime;",
+            "    }",
+            "    return -1;",
+            "}",
+            "// ctime(t) without the trailing newline (for ls -l dates).",
+            "char* __xlang_fmt_ctime(int32_t t) {",
+            "    time_t tt = (time_t)t;",
+            "    char* s = ctime(&tt);",
+            "    if (!s) { char* e = (char*)malloc(1); e[0] = 0; return e; }",
+            "    char* out = strdup(s);",
+            "    int n = (int)strlen(out);",
+            "    if (n > 0 && out[n-1] == '\\n') out[n-1] = 0;",
+            "    return out;",
+            "}",
             "char* __xlang_getcwd() {",
             "    char* buf = (char*)malloc(4096);",
             "    return getcwd(buf, 4096);",
@@ -1821,6 +1846,14 @@ impl CGen {
             "is_dir" => format!("__xlang_is_dir({a})"),
             "file_size" => format!("__xlang_file_size({a})"),
             "file_exists" => format!("__xlang_file_exists({a})"),
+            "fmt_ctime" => format!("__xlang_fmt_ctime({a})"),
+            "stat_field" => {
+                let Some(second) = args.get(1) else {
+                    return Ok(None);
+                };
+                let b = self.gen_expr(second)?;
+                format!("__xlang_stat_field({a}, {b})")
+            }
             "chdir" => format!("chdir(({a}))"),
             "make_dir" => format!("mkdir({a}, 0755)"),
             "kill" => {
