@@ -1998,6 +1998,7 @@ impl CGen {
             "read_line" => "__xlang_read_line()".to_string(),
             "sb_new" => "__xlang_sb_new()".to_string(),
             "sb_str" => "__xlang_sb_str()".to_string(),
+            "ignore_sigpipe" => "signal(SIGPIPE, SIG_IGN)".to_string(),
             "time_str" => "__xlang_time_str()".to_string(),
             "random_seed" => "srand((unsigned)time(NULL))".to_string(),
             "getcwd" => "__xlang_getcwd()".to_string(),
