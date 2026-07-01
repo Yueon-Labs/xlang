@@ -1293,6 +1293,7 @@ impl CGen {
             "#include <sys/socket.h>",
             "#include <netinet/in.h>",
             "#include <arpa/inet.h>",
+            "#include <netdb.h>",
             "#include <dirent.h>",
             "#include <sys/stat.h>",
             "#include <signal.h>",
@@ -1314,6 +1315,27 @@ impl CGen {
             "    addr.sin_port = htons((uint16_t)port);",
             "    bind(fd, (struct sockaddr*)&addr, sizeof(addr));",
             "    listen(fd, 64);",
+            "    return (int32_t)fd;",
+            "}",
+            "// Connect a TCP client to <host>:<port>. Resolves hostnames (via",
+            "// getaddrinfo) as well as dotted-quads, so reverse-proxy upstreams can",
+            "// be named. Returns the connected fd, or -1 on failure.",
+            "int32_t __xlang_tcp_connect(const char* host, int32_t port) {",
+            "    struct addrinfo hints, *res, *rp;",
+            "    memset(&hints, 0, sizeof(hints));",
+            "    hints.ai_family = AF_INET;",
+            "    hints.ai_socktype = SOCK_STREAM;",
+            "    char portstr[16];",
+            "    snprintf(portstr, sizeof(portstr), \"%d\", (int)port);",
+            "    if (getaddrinfo(host, portstr, &hints, &res) != 0) return -1;",
+            "    int fd = -1;",
+            "    for (rp = res; rp != NULL; rp = rp->ai_next) {",
+            "        fd = (int)socket(rp->ai_family, rp->ai_socktype, rp->ai_protocol);",
+            "        if (fd < 0) continue;",
+            "        if (connect(fd, rp->ai_addr, rp->ai_addrlen) == 0) break;",
+            "        close(fd); fd = -1;",
+            "    }",
+            "    freeaddrinfo(res);",
             "    return (int32_t)fd;",
             "}",
             "char* __xlang_recv_str(int32_t fd) {",
@@ -1810,6 +1832,13 @@ impl CGen {
                 format!("__xlang_write_file({a}, {b})")
             }
             "tcp_listen" => format!("__xlang_tcp_listen({a})"),
+            "tcp_connect" => {
+                let Some(second) = args.get(1) else {
+                    return Ok(None);
+                };
+                let b = self.gen_expr(second)?;
+                format!("__xlang_tcp_connect({a}, {b})")
+            }
             "accept" => format!("accept({a}, 0, 0)"),
             "recv_str" => format!("__xlang_recv_str({a})"),
             "close_fd" => format!("close({a})"),
