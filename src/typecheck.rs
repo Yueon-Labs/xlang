@@ -243,9 +243,10 @@ impl Checker {
                 self.infer_expr(value);
                 for arm in arms {
                     self.push_scope();
-                    let Pattern::VariantPattern { bindings, .. } = &arm.pattern;
-                    for binding in bindings {
-                        self.declare(binding, false, CheckedType::Unknown, stmt.span);
+                    if let crate::ast::Pattern::VariantPattern { bindings, .. } = &arm.pattern {
+                        for binding in bindings {
+                            self.declare(binding, false, CheckedType::Unknown, stmt.span);
+                        }
                     }
                     self.check_statements(&arm.body.statements);
                     self.pop_scope();

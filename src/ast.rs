@@ -122,6 +122,8 @@ pub struct MatchArm {
 #[serde(tag = "kind")]
 pub enum Pattern {
     VariantPattern { name: String, bindings: Vec<String> },
+    LiteralPattern { value: String },
+    WildcardPattern,
 }
 
 #[derive(Clone, Debug, Serialize)]

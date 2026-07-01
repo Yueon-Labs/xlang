@@ -762,6 +762,76 @@ impl CGen {
     /// Lower `match scrut { Some/Ok(v) => .., None/Err(..) => .. }` to a C
     /// `if/else` on the discriminant. v1: `scrut` must be a variable of type
     /// `Option<T>` or `Result<T, E>`.
+    /// Generate if-else chains for match on i32/String literals + wildcard.
+    fn gen_literal_match(
+        &mut self,
+        value: &Spanned<Expr>,
+        arms: &[MatchArm],
+        ty_name: &str,
+    ) -> XResult<()> {
+        use crate::ast::Pattern;
+        let scrut_c = self.gen_expr(value)?;
+        let is_string = matches!(ty_name, "String" | "Str");
+        let mut first = true;
+        let mut wildcard_body: Option<&crate::ast::Block> = None;
+
+        for arm in arms {
+            match &arm.pattern {
+                Pattern::LiteralPattern { value: lit } => {
+                    let cond = if is_string {
+                        format!("strcmp({scrut_c}, \"{lit}\") == 0")
+                    } else {
+                        format!("{scrut_c} == {lit}")
+                    };
+                    if first {
+                        self.emit(&format!("if ({cond}) {{"));
+                        first = false;
+                    } else {
+                        self.emit(&format!("}} else if ({cond}) {{"));
+                    }
+                    self.indent += 1;
+                    self.push_scope();
+                    for inner in &arm.body.statements {
+                        self.gen_stmt(inner)?;
+                    }
+                    self.pop_scope();
+                    self.indent -= 1;
+                }
+                Pattern::WildcardPattern => {
+                    wildcard_body = Some(&arm.body);
+                }
+                Pattern::VariantPattern { name, .. } => {
+                    return Err(XError::Codegen(format!(
+                        "variant pattern {name:?} not supported in literal match on {ty_name}"
+                    )));
+                }
+            }
+        }
+
+        if let Some(body) = wildcard_body {
+            if first {
+                self.push_scope();
+                for inner in &body.statements {
+                    self.gen_stmt(inner)?;
+                }
+                self.pop_scope();
+            } else {
+                self.emit("} else {");
+                self.indent += 1;
+                self.push_scope();
+                for inner in &body.statements {
+                    self.gen_stmt(inner)?;
+                }
+                self.pop_scope();
+                self.indent -= 1;
+                self.emit("}");
+            }
+        } else if !first {
+            self.emit("}");
+        }
+        Ok(())
+    }
+
     fn gen_match_stmt(&mut self, value: &Spanned<Expr>, arms: &[MatchArm]) -> XResult<()> {
         let Expr::Identifier { name: scrut_name } = &value.node else {
             return Err(XError::Codegen(
@@ -777,6 +847,10 @@ impl CGen {
                 "match scrutinee {scrut_name:?} is not a typed variable"
             )));
         };
+        // Literal match for i32 / String scrutinees.
+        if matches!(ty_name.as_str(), "i32" | "String" | "Str") {
+            return self.gen_literal_match(value, arms, &ty_name);
+        }
         let is_option = match (ty_name.as_str(), args.len()) {
             ("Option", 1) => true,
             ("Result", 2) => false,
@@ -797,7 +871,9 @@ impl CGen {
         let mut positive: Option<&MatchArm> = None;
         let mut negative: Option<&MatchArm> = None;
         for arm in arms {
-            let Pattern::VariantPattern { name, .. } = &arm.pattern;
+            let crate::ast::Pattern::VariantPattern { name, .. } = &arm.pattern else {
+                continue;
+            };
             match name.as_str() {
                 "Some" | "Ok" => positive = Some(arm),
                 "None" | "Err" => negative = Some(arm),
@@ -814,7 +890,9 @@ impl CGen {
         self.indent += 1;
         self.push_scope();
         if let Some(arm) = positive {
-            let Pattern::VariantPattern { bindings, .. } = &arm.pattern;
+            let crate::ast::Pattern::VariantPattern { bindings, .. } = &arm.pattern else {
+                unreachable!("non-variant arm in Option/Result match")
+            };
             if let Some(binding) = bindings.first() {
                 let payload_c = self.c_type(&payload_ty)?;
                 self.declare_var(binding, payload_ty.clone());
@@ -831,7 +909,9 @@ impl CGen {
             self.indent += 1;
             self.push_scope();
             if let Some(err_ty) = &err_ty {
-                let Pattern::VariantPattern { bindings, .. } = &arm.pattern;
+                let crate::ast::Pattern::VariantPattern { bindings, .. } = &arm.pattern else {
+                    unreachable!()
+                };
                 if let Some(binding) = bindings.first() {
                     let err_c = self.c_type(err_ty)?;
                     self.declare_var(binding, err_ty.clone());

@@ -458,6 +458,22 @@ impl Parser {
     }
 
     fn parse_pattern(&mut self) -> Result<Pattern, Diagnostic> {
+        // Wildcard: identifier "_"
+        if self.peek().kind == TokenKind::Ident && self.peek().text == "_" {
+            self.bump();
+            return Ok(Pattern::WildcardPattern);
+        }
+        // Integer literal
+        if self.peek().kind == TokenKind::Int {
+            let text = self.bump().text;
+            return Ok(Pattern::LiteralPattern { value: text });
+        }
+        // String literal
+        if self.peek().kind == TokenKind::String {
+            let text = self.bump().text;
+            return Ok(Pattern::LiteralPattern { value: text });
+        }
+        // Existing: identifier (variant pattern with optional bindings)
         let name = self.expect_ident()?.text;
         let mut bindings = Vec::new();
         if self.match_text("(") {
