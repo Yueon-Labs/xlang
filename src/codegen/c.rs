@@ -2439,4 +2439,13 @@ mod tests {
         assert!(c.contains("__xlang_max("), "no max: {c}");
         assert!(c.contains("__xlang_min("), "no min: {c}");
     }
+
+    #[test]
+    fn emits_for_in_loop() {
+        let c = gen_c(
+            "module main\nfn main(): i32 { let v: Vec<i32> = vec_new() for x in v { print_raw(\"hi\") } return 0 }",
+        );
+        assert!(c.contains(".data["), "no for-in data access: {c}");
+        assert!(c.contains("for ("), "no for loop: {c}");
+    }
 }
