@@ -2297,6 +2297,13 @@ impl CGen {
             "tty" => "__xlang_tty()".to_string(),
             "uname_machine" => "__xlang_uname_machine()".to_string(),
             "rbuf_str" => "__xlang_rbuf_str()".to_string(),
+            "rbuf_byte_at" => {
+                let Some(second) = args.get(1) else {
+                    return Ok(None);
+                };
+                let b = self.gen_expr(second)?;
+                format!("((int32_t)(unsigned char)__xlang_rbuf[{b}])")
+            }
             _ => return Ok(None),
         }))
     }
