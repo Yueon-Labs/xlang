@@ -2427,8 +2427,14 @@ mod tests {
         let c = gen_c(
             "module main\nfn main(): i32 { let i: i32 = str_find_from(\"a-b\", \"-\", 1) let s: String = str_replace_first(\"a-b\", \"-\", \"+\") let x: i32 = abs(-5) let y: i32 = max(1, 2) let z: i32 = min(1, 2) return 0 }",
         );
-        assert!(c.contains("__xlang_str_find_from("), "no str_find_from: {c}");
-        assert!(c.contains("__xlang_str_replace_first("), "no str_replace_first: {c}");
+        assert!(
+            c.contains("__xlang_str_find_from("),
+            "no str_find_from: {c}"
+        );
+        assert!(
+            c.contains("__xlang_str_replace_first("),
+            "no str_replace_first: {c}"
+        );
         assert!(c.contains("__xlang_abs("), "no abs: {c}");
         assert!(c.contains("__xlang_max("), "no max: {c}");
         assert!(c.contains("__xlang_min("), "no min: {c}");
