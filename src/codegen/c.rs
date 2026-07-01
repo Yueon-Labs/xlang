@@ -1246,6 +1246,21 @@ impl CGen {
             "    out[n] = 0;",
             "    return out;",
             "}",
+            "char* __xlang_str_repeat(const char* s, int32_t n) {",
+            "    size_t sl = strlen(s);",
+            "    if (n < 0) n = 0;",
+            "    size_t total = sl * (size_t)n;",
+            "    char* out = (char*)malloc(total + 1);",
+            "    for (int32_t i = 0; i < n; i++) memcpy(out + (size_t)i * sl, s, sl);",
+            "    out[total] = 0;",
+            "    return out;",
+            "}",
+            "char* __xlang_chr(int32_t n) {",
+            "    char* out = (char*)malloc(2);",
+            "    out[0] = (char)n;",
+            "    out[1] = 0;",
+            "    return out;",
+            "}",
             "char* __xlang_str_translate(const char* s, const char* from, const char* to) {",
             "    int32_t n = (int32_t)strlen(s);",
             "    int32_t tn = (int32_t)strlen(to);",
@@ -1821,6 +1836,14 @@ impl CGen {
             "str_reverse" => format!("__xlang_str_reverse({a})"),
             "str_lower" => format!("__xlang_str_lower({a})"),
             "str_upper" => format!("__xlang_str_upper({a})"),
+            "str_repeat" => {
+                let Some(second) = args.get(1) else {
+                    return Ok(None);
+                };
+                let b = self.gen_expr(second)?;
+                format!("__xlang_str_repeat({a}, {b})")
+            }
+            "chr" => format!("__xlang_chr({a})"),
             "str_trim" => format!("__xlang_str_trim({a})"),
             "str_contains" => {
                 let Some(second) = args.get(1) else {
@@ -2334,5 +2357,14 @@ mod tests {
         );
         assert!(c.contains("__xlang_str_lower("), "no str_lower: {c}");
         assert!(c.contains("__xlang_str_upper("), "no str_upper: {c}");
+    }
+
+    #[test]
+    fn emits_str_repeat_chr() {
+        let c = gen_c(
+            "module main\nfn main(): i32 { let s: String = str_repeat(\"ab\", 3) let c: String = chr(65) return 0 }",
+        );
+        assert!(c.contains("__xlang_str_repeat("), "no str_repeat: {c}");
+        assert!(c.contains("__xlang_chr("), "no chr: {c}");
     }
 }
