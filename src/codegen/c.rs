@@ -1903,6 +1903,7 @@ impl CGen {
             "print_raw" => format!("printf(\"%s\", {a})"),
             "int_to_str" => format!("__xlang_int_to_str({a})"),
             "float_to_str" => format!("__xlang_float_to_str({a})"),
+            "int_to_f64" => format!("(double)({a})"),
             "sha256_hex" => format!("__xlang_sha256_hex({a})"),
             "md5_hex" => format!("__xlang_md5_hex({a})"),
             "sha1_hex" => format!("__xlang_sha1_hex({a})"),
