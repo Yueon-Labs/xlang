@@ -1261,6 +1261,29 @@ impl CGen {
             "    out[1] = 0;",
             "    return out;",
             "}",
+            "// Find sub in s starting at byte offset `from`; absolute index or -1.",
+            "int32_t __xlang_str_find_from(const char* s, const char* sub, int32_t from) {",
+            "    size_t sl = strlen(s);",
+            "    if (from < 0) from = 0;",
+            "    if ((size_t)from > sl) return -1;",
+            "    const char* p = strstr(s + from, sub);",
+            "    return p ? (int32_t)(p - s) : -1;",
+            "}",
+            "// Replace the FIRST occurrence of `from` with `to` (str_replace does all).",
+            "char* __xlang_str_replace_first(const char* s, const char* from, const char* to) {",
+            "    const char* p = strstr(s, from);",
+            "    size_t sl = strlen(s), fl = strlen(from), tl = strlen(to);",
+            "    if (!p) { char* d = (char*)malloc(sl + 1); strcpy(d, s); return d; }",
+            "    size_t pre = (size_t)(p - s);",
+            "    char* out = (char*)malloc(sl + (tl > fl ? tl - fl : 0) + 1);",
+            "    memcpy(out, s, pre);",
+            "    memcpy(out + pre, to, tl);",
+            "    strcpy(out + pre + tl, p + fl);",
+            "    return out;",
+            "}",
+            "int32_t __xlang_abs(int32_t n) { return n < 0 ? -n : n; }",
+            "int32_t __xlang_max(int32_t a, int32_t b) { return a > b ? a : b; }",
+            "int32_t __xlang_min(int32_t a, int32_t b) { return a < b ? a : b; }",
             "char* __xlang_str_translate(const char* s, const char* from, const char* to) {",
             "    int32_t n = (int32_t)strlen(s);",
             "    int32_t tn = (int32_t)strlen(to);",
@@ -1804,6 +1827,20 @@ impl CGen {
                 let b = self.gen_expr(second)?;
                 format!("__xlang_pad_int({a}, {b})")
             }
+            "max" => {
+                let Some(second) = args.get(1) else {
+                    return Ok(None);
+                };
+                let b = self.gen_expr(second)?;
+                format!("__xlang_max({a}, {b})")
+            }
+            "min" => {
+                let Some(second) = args.get(1) else {
+                    return Ok(None);
+                };
+                let b = self.gen_expr(second)?;
+                format!("__xlang_min({a}, {b})")
+            }
             "str_concat" => {
                 let Some(second) = args.get(1) else {
                     return Ok(None);
@@ -1844,6 +1881,7 @@ impl CGen {
                 format!("__xlang_str_repeat({a}, {b})")
             }
             "chr" => format!("__xlang_chr({a})"),
+            "abs" => format!("__xlang_abs({a})"),
             "str_trim" => format!("__xlang_str_trim({a})"),
             "str_contains" => {
                 let Some(second) = args.get(1) else {
@@ -1873,6 +1911,22 @@ impl CGen {
                 let b = self.gen_expr(second)?;
                 let c = self.gen_expr(third)?;
                 format!("__xlang_str_replace({a}, {b}, {c})")
+            }
+            "str_replace_first" => {
+                let (Some(second), Some(third)) = (args.get(1), args.get(2)) else {
+                    return Ok(None);
+                };
+                let b = self.gen_expr(second)?;
+                let c = self.gen_expr(third)?;
+                format!("__xlang_str_replace_first({a}, {b}, {c})")
+            }
+            "str_find_from" => {
+                if args.len() < 3 {
+                    return Ok(None);
+                }
+                let b = self.gen_expr(&args[1])?;
+                let c = self.gen_expr(&args[2])?;
+                format!("__xlang_str_find_from({a}, {b}, {c})")
             }
             "str_translate" => {
                 let (Some(second), Some(third)) = (args.get(1), args.get(2)) else {
@@ -2366,5 +2420,23 @@ mod tests {
         );
         assert!(c.contains("__xlang_str_repeat("), "no str_repeat: {c}");
         assert!(c.contains("__xlang_chr("), "no chr: {c}");
+    }
+
+    #[test]
+    fn emits_misc_builtins() {
+        let c = gen_c(
+            "module main\nfn main(): i32 { let i: i32 = str_find_from(\"a-b\", \"-\", 1) let s: String = str_replace_first(\"a-b\", \"-\", \"+\") let x: i32 = abs(-5) let y: i32 = max(1, 2) let z: i32 = min(1, 2) return 0 }",
+        );
+        assert!(
+            c.contains("__xlang_str_find_from("),
+            "no str_find_from: {c}"
+        );
+        assert!(
+            c.contains("__xlang_str_replace_first("),
+            "no str_replace_first: {c}"
+        );
+        assert!(c.contains("__xlang_abs("), "no abs: {c}");
+        assert!(c.contains("__xlang_max("), "no max: {c}");
+        assert!(c.contains("__xlang_min("), "no min: {c}");
     }
 }
