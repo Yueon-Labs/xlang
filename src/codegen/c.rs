@@ -2456,6 +2456,15 @@ mod tests {
     }
 
     #[test]
+    fn emits_match_literal_if_else() {
+        let c = gen_c(
+            "module main\nfn main(): i32 { let x: i32 = 2 match x { 1 => { return 1 } _ => { return 0 } } }",
+        );
+        assert!(c.contains("if (x == 1)"), "no literal match if: {c}");
+        assert!(c.contains("} else {"), "no wildcard else: {c}");
+    }
+
+    #[test]
     fn emits_print_printf() {
         let c = gen_c("module main\nfn main(): i32 { print_i32(42) return 0 }");
         assert!(c.contains("printf("), "no printf: {c}");
