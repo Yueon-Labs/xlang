@@ -1224,6 +1224,28 @@ impl CGen {
             "    out[n] = 0;",
             "    return out;",
             "}",
+            "char* __xlang_str_lower(const char* s) {",
+            "    size_t n = strlen(s);",
+            "    char* out = (char*)malloc(n + 1);",
+            "    for (size_t i = 0; i < n; i++) {",
+            "        char c = s[i];",
+            "        if (c >= 'A' && c <= 'Z') c = (char)(c + 32);",
+            "        out[i] = c;",
+            "    }",
+            "    out[n] = 0;",
+            "    return out;",
+            "}",
+            "char* __xlang_str_upper(const char* s) {",
+            "    size_t n = strlen(s);",
+            "    char* out = (char*)malloc(n + 1);",
+            "    for (size_t i = 0; i < n; i++) {",
+            "        char c = s[i];",
+            "        if (c >= 'a' && c <= 'z') c = (char)(c - 32);",
+            "        out[i] = c;",
+            "    }",
+            "    out[n] = 0;",
+            "    return out;",
+            "}",
             "char* __xlang_str_translate(const char* s, const char* from, const char* to) {",
             "    int32_t n = (int32_t)strlen(s);",
             "    int32_t tn = (int32_t)strlen(to);",
@@ -1797,6 +1819,8 @@ impl CGen {
                 format!("__xlang_str_slice({a}, {b}, {c})")
             }
             "str_reverse" => format!("__xlang_str_reverse({a})"),
+            "str_lower" => format!("__xlang_str_lower({a})"),
+            "str_upper" => format!("__xlang_str_upper({a})"),
             "str_trim" => format!("__xlang_str_trim({a})"),
             "str_contains" => {
                 let Some(second) = args.get(1) else {
@@ -2301,5 +2325,14 @@ mod tests {
         );
         assert!(c.contains("__xlang_str_find("), "no str_find: {c}");
         assert!(c.contains("__xlang_str_slice("), "no str_slice: {c}");
+    }
+
+    #[test]
+    fn emits_str_lower_upper() {
+        let c = gen_c(
+            "module main\nfn main(): i32 { let s: String = \"Hi\" let a: String = str_lower(s) let b: String = str_upper(s) return 0 }",
+        );
+        assert!(c.contains("__xlang_str_lower("), "no str_lower: {c}");
+        assert!(c.contains("__xlang_str_upper("), "no str_upper: {c}");
     }
 }
