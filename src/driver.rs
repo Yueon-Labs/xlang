@@ -22,21 +22,22 @@ const DEFAULT_RUN_SAFE_OUTPUT_LIMIT_BYTES: usize = 64 * 1024;
 /// build on platforms where `cc` is absent (e.g. Windows/MinGW has `gcc`, macOS
 /// may have only `clang`). The chosen binary is cached so we only probe once.
 fn pick_cc() -> String {
-    if let Ok(v) = std::env::var("XLANG_CC") {
-        if !v.is_empty() {
-            return v;
-        }
+    if let Some(v) = std::env::var("XLANG_CC").ok().filter(|v| !v.is_empty()) {
+        return v;
     }
     // Cache the probe result for the process lifetime.
     if let Some(c) = CC_CACHE.get() {
         return c.clone();
     }
     for cand in ["cc", "gcc", "clang", "clang-17", "gcc-14"] {
-        if let Ok(out) = Command::new(cand).arg("--version").output() {
-            if out.status.success() {
-                CC_CACHE.set(cand.to_string()).ok();
-                return cand.to_string();
-            }
+        let ok = Command::new(cand)
+            .arg("--version")
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false);
+        if ok {
+            CC_CACHE.set(cand.to_string()).ok();
+            return cand.to_string();
         }
     }
     // Fall back to "cc"; the later Command will fail with a clear-ish error.
