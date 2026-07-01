@@ -1540,6 +1540,16 @@ impl CGen {
             "    if (WIFEXITED(st)) return WEXITSTATUS(st);",
             "    return 1;",
             "}",
+            "// waitpid for a SPECIFIC child, return its exit status. If the child was",
+            "// killed by a signal, return 128+signo (shell convention, e.g. SIGTERM",
+            "// =15 -> 143). Used by timeout to wait for the command child.",
+            "int32_t __xlang_wait_pid_status(int32_t pid) {",
+            "    int st = 0;",
+            "    waitpid((pid_t)pid, &st, 0);",
+            "    if (WIFEXITED(st)) return WEXITSTATUS(st);",
+            "    if (WIFSIGNALED(st)) return 128 + WTERMSIG(st);",
+            "    return 1;",
+            "}",
             "char* __xlang_read_fd(int32_t fd) {",
             "    size_t cap = 65536, len = 0;",
             "    char* buf = (char*)malloc(cap);",
@@ -1849,6 +1859,7 @@ impl CGen {
                 format!("truncate(({a}), ({b}))")
             }
             "mkfifo" => format!("mkfifo(({a}), 0644)"),
+            "wait_pid_status" => format!("__xlang_wait_pid_status({a})"),
             "rmdir" => format!("rmdir(({a}))"),
             "str_to_int_oct" => format!("(int32_t)strtol({a}, 0, 8)"),
             "chmod" => {
