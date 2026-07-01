@@ -1345,6 +1345,37 @@ impl CGen {
             "    buf[n] = 0;",
             "    return buf;",
             "}",
+            "// Binary-safe byte I/O: a static receive buffer with EXPLICIT lengths,",
+            "// so NUL bytes in the stream don't truncate (every string builtin above",
+            "// is strlen-terminated and stops at NUL). Used by the reverse proxy to",
+            "// relay binary response bodies (images, compressed, ...).",
+            "static char __xlang_rbuf[65536];",
+            "// recv up to 65535 bytes into __xlang_rbuf; NUL-terminate at the count so",
+            "// a text view (rbuf_str + str_find) works on the header region (headers",
+            "// are NUL-free; only body bytes past the first NUL are invisible). Returns",
+            "// the byte count, or 0 on EOF/error.",
+            "int32_t __xlang_recv_n(int32_t fd) {",
+            "    ssize_t n = recv(fd, __xlang_rbuf, 65535, 0);",
+            "    if (n < 0) n = 0;",
+            "    __xlang_rbuf[n] = 0;",
+            "    return (int32_t)n;",
+            "}",
+            "// View __xlang_rbuf as a (NUL-terminated) C string — valid for the header",
+            "// region only; body bytes after the first NUL are invisible to str_* builtins.",
+            "const char* __xlang_rbuf_str() { return __xlang_rbuf; }",
+            "// Send exactly len bytes from __xlang_rbuf (loops on partial writes for",
+            "// blocking sockets; binary-safe — NULs are ignored). Returns bytes sent.",
+            "int32_t __xlang_send_rbuf(int32_t fd, int32_t len) {",
+            "    size_t off = 0;",
+            "    size_t remaining = (size_t)len;",
+            "    while (remaining > 0) {",
+            "        ssize_t s = send(fd, __xlang_rbuf + off, remaining, 0);",
+            "        if (s > 0) { off += (size_t)s; remaining -= (size_t)s; continue; }",
+            "        if (s < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) { sched_yield(); continue; }",
+            "        break;",
+            "    }",
+            "    return (int32_t)((size_t)len - remaining);",
+            "}",
             "// epoll event-loop support. A single global epoll fd + a ready-fd",
             "// ring buffer, so xlang treats epoll_wait(timeout) as \"next ready fd\".",
             "#define __XLANG_EPQ_CAP 8192",
@@ -1841,6 +1872,7 @@ impl CGen {
             }
             "accept" => format!("accept({a}, 0, 0)"),
             "recv_str" => format!("__xlang_recv_str({a})"),
+            "recv_n" => format!("__xlang_recv_n({a})"),
             "close_fd" => format!("close({a})"),
             "epoll_add" => format!("__xlang_epoll_add({a})"),
             "epoll_del" => format!("__xlang_epoll_del({a})"),
@@ -1896,6 +1928,13 @@ impl CGen {
                 let b = self.gen_expr(second)?;
                 let c = self.gen_expr(third)?;
                 format!("send({a}, {b}, (size_t)({c}), 0)")
+            }
+            "send_rbuf" => {
+                let Some(second) = args.get(1) else {
+                    return Ok(None);
+                };
+                let b = self.gen_expr(second)?;
+                format!("__xlang_send_rbuf({a}, {b})")
             }
             _ => return Ok(None),
         };
@@ -1965,6 +2004,7 @@ impl CGen {
             "env_count" => "__xlang_env_count()".to_string(),
             "tty" => "__xlang_tty()".to_string(),
             "uname_machine" => "__xlang_uname_machine()".to_string(),
+            "rbuf_str" => "__xlang_rbuf_str()".to_string(),
             _ => return Ok(None),
         }))
     }
