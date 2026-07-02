@@ -130,9 +130,24 @@ pub struct MatchArm {
 #[derive(Clone, Debug, Serialize)]
 #[serde(tag = "kind")]
 pub enum Pattern {
-    VariantPattern { name: String, bindings: Vec<String> },
-    LiteralPattern { value: String },
+    VariantPattern {
+        name: String,
+        bindings: Vec<String>,
+    },
+    LiteralPattern {
+        value: String,
+    },
     WildcardPattern,
+    /// `a | b | c` — matches if any alternative matches (literals/ranges).
+    OrPattern {
+        alternatives: Vec<Pattern>,
+    },
+    /// `start..end` (exclusive) or `start..=end` (inclusive), integer only.
+    RangePattern {
+        start: String,
+        end: String,
+        inclusive: bool,
+    },
 }
 
 #[derive(Clone, Debug, Serialize)]
