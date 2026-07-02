@@ -2607,6 +2607,18 @@ impl CGen {
                     let r = self.gen_expr(right)?;
                     Ok(format!("__xlang_str_concat({l}, {r})"))
                 }
+                // `*` on a string repeats it: `s * n` or `n * s` → str_repeat.
+                else if op == "*" && str_operand {
+                    if self.types.is_string(left) {
+                        let s = self.gen_expr(left)?;
+                        let n = self.gen_expr(right)?;
+                        Ok(format!("__xlang_str_repeat({s}, {n})"))
+                    } else {
+                        let s = self.gen_expr(right)?;
+                        let n = self.gen_expr(left)?;
+                        Ok(format!("__xlang_str_repeat({s}, {n})"))
+                    }
+                }
                 // String comparison (`< <= > >= == !=`) lowers to strcmp(...) <op> 0.
                 // Without this, `s1 == s2` would be C pointer comparison (a bug —
                 // always false for distinct allocations); strcmp compares content.
@@ -2918,6 +2930,25 @@ mod tests {
         assert!(
             c.contains("(int64_t)(x)") && !c.contains("int_to_i64("),
             "int_to_i64 should lower to a cast: {c}"
+        );
+    }
+
+    #[test]
+    fn lowers_string_repeat_to_str_repeat() {
+        // `s * n` → __xlang_str_repeat(s, n); numeric `*` must stay a multiply.
+        let c = gen_c_typed(
+            "module main\nfn rep(s: String, n: i32): String { return s * n }\nfn main(): i32 { return 0 }",
+        );
+        assert!(
+            c.contains("__xlang_str_repeat(s, n)"),
+            "string * should lower to str_repeat: {c}"
+        );
+        let c2 = gen_c_typed(
+            "module main\nfn mul(a: i32, b: i32): i32 { return a * b }\nfn main(): i32 { return 0 }",
+        );
+        assert!(
+            c2.contains("return (a * b)") && !c2.contains("__xlang_str_repeat"),
+            "numeric * should stay a multiply: {c2}"
         );
     }
 

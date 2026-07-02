@@ -593,6 +593,32 @@ impl Checker {
                 }
                 CheckedType::named("String")
             }
+            // String repeat: `s * n` (or `n * s`) → str_repeat(s, n). One
+            // operand is the string, the other an integer count.
+            "*" if left_ty.is_string() || right_ty.is_string() => {
+                if left_ty.is_string() && right_ty.is_string() {
+                    self.emit(
+                        span,
+                        ErrorCode::TypeOperatorMismatch,
+                        "cannot repeat two strings with *".to_string(),
+                    );
+                }
+                if left_ty.is_string() && !right_ty.is_unknown() && !right_ty.is_numeric() {
+                    self.emit(
+                        span,
+                        ErrorCode::TypeOperatorMismatch,
+                        format!("cannot repeat String with {}", right_ty.display()),
+                    );
+                }
+                if right_ty.is_string() && !left_ty.is_unknown() && !left_ty.is_numeric() {
+                    self.emit(
+                        span,
+                        ErrorCode::TypeOperatorMismatch,
+                        format!("cannot repeat String with {}", left_ty.display()),
+                    );
+                }
+                CheckedType::named("String")
+            }
             "+" | "-" | "*" | "/" | "%" | "&" | "|" | "^" | "<<" | ">>" => {
                 self.infer_numeric_result(op, &left_ty, &right_ty, span)
             }
