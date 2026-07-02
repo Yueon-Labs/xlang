@@ -404,6 +404,12 @@ impl Parser {
     fn parse_if_stmt(&mut self) -> Result<Spanned<Stmt>, Diagnostic> {
         let start = self.cur_start();
         self.expect("if")?;
+        // `if let <pattern> = <expr> { .. } else { .. }` desugars to a match
+        // with the pattern as one arm and a wildcard as the other — reusing all
+        // of match's lowering (Option/Result discriminant, literal, etc.).
+        if self.match_text("let") {
+            return self.parse_if_let_match(start);
+        }
         let condition = self.parse_expr()?;
         let then_block = self.parse_block()?;
         let else_branch = if self.match_text("else") {
@@ -420,6 +426,50 @@ impl Parser {
                 condition,
                 then_block,
                 else_branch,
+            },
+            self.span_from(start),
+        ))
+    }
+
+    /// Build the MatchStmt that `if let Pat = expr { then } else { else }`
+    /// desugars to: `match expr { Pat => { then } _ => { else } }`.
+    fn parse_if_let_match(&mut self, start: u32) -> Result<Spanned<Stmt>, Diagnostic> {
+        let pattern = self.parse_pattern()?;
+        self.expect("=")?;
+        let value = self.parse_expr()?;
+        let then_block = self.parse_block()?;
+        // The else arm: an explicit block, or an `else if` (wrapped as a
+        // single-statement block), or an empty block when absent.
+        let else_block = if self.match_text("else") {
+            if self.check("if") {
+                Block {
+                    kind: "Block",
+                    statements: vec![self.parse_if_stmt()?],
+                }
+            } else {
+                self.parse_block()?
+            }
+        } else {
+            Block {
+                kind: "Block",
+                statements: vec![],
+            }
+        };
+        Ok(Spanned::new(
+            Stmt::MatchStmt {
+                value,
+                arms: vec![
+                    MatchArm {
+                        kind: "MatchArm",
+                        pattern,
+                        body: then_block,
+                    },
+                    MatchArm {
+                        kind: "MatchArm",
+                        pattern: Pattern::WildcardPattern,
+                        body: else_block,
+                    },
+                ],
             },
             self.span_from(start),
         ))

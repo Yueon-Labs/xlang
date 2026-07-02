@@ -972,19 +972,23 @@ impl CGen {
     }
 
     fn gen_match_stmt(&mut self, value: &Spanned<Expr>, arms: &[MatchArm]) -> XResult<()> {
-        let Expr::Identifier { name: scrut_name } = &value.node else {
-            return Err(XError::Codegen(
-                "match currently supports only a variable (identifier) scrutinee".to_string(),
-            ));
+        // Resolve the scrutinee's type: from a typed variable, or (for arbitrary
+        // expressions like `match func() { .. }` and `if let Pat = func() { }`)
+        // from the type map. This lifts the old identifier-only restriction.
+        let scrut_ty = if let Expr::Identifier { name } = &value.node {
+            self.lookup_var(name).cloned()
+        } else {
+            self.types.type_node(value)
         };
         let Some(TypeNode::TypeExpr {
             name: ty_name,
             args,
-        }) = self.lookup_var(scrut_name).cloned()
+        }) = scrut_ty
         else {
-            return Err(XError::Codegen(format!(
-                "match scrutinee {scrut_name:?} is not a typed variable"
-            )));
+            return Err(XError::Codegen(
+                "match scrutinee has an unknown type (annotate it or bind it to a variable first)"
+                    .to_string(),
+            ));
         };
         // Literal match for i32 / String scrutinees.
         if matches!(ty_name.as_str(), "i32" | "String" | "Str") {
@@ -1024,7 +1028,25 @@ impl CGen {
             }
         }
 
-        let scrut_c = self.gen_expr(value)?;
+        // The Option/Result match reads `.some`/`.value`, so it needs an
+        // lvalue. A plain variable is one; anything else is bound to a typed
+        // temp first (so `match func() {..}` / `if let Some(v) = func() {..}`
+        // work).
+        let scrut_c = if let Expr::Identifier { name } = &value.node {
+            name.clone()
+        } else {
+            let ty = self.types.type_node(value).ok_or_else(|| {
+                XError::Codegen(
+                    "match scrutinee has an unknown type (annotate it or bind it to a variable first)"
+                        .to_string(),
+                )
+            })?;
+            let c_ty = self.c_type(&ty)?;
+            let temp = self.next_temp("m");
+            let init = self.gen_expr(value)?;
+            self.emit(&format!("{c_ty} {temp} = {init};"));
+            temp
+        };
         self.emit(&format!("if ({scrut_c}.{discriminant}) {{"));
         self.indent += 1;
         self.push_scope();
@@ -1089,6 +1111,18 @@ impl CGen {
             "    char* buf = (char*)malloc(16);",
             "    snprintf(buf, 16, \"%d\", n);",
             "    return buf;",
+            "}",
+            "// assert / panic / unreachable — program-invariant self-checks.",
+            "// Each prints to stderr and exits non-zero (so a failing assertion",
+            "// surfaces as a non-zero exit code, not silent wrong output).",
+            "void __xlang_assert(int32_t cond, const char* msg) {",
+            "    if (!cond) { fprintf(stderr, \"xlang assertion failed: %s\\n\", msg ? msg : \"\"); exit(1); }",
+            "}",
+            "void __xlang_panic(const char* msg) {",
+            "    fprintf(stderr, \"xlang panic: %s\\n\", msg ? msg : \"\"); exit(1);",
+            "}",
+            "void __xlang_unreachable_(void) {",
+            "    fprintf(stderr, \"xlang: reached unreachable\\n\"); exit(1);",
             "}",
             "// SHA-256 hash → 64-char hex string. Standard FIPS 180-4 implementation.",
             "char* __xlang_sha256_hex(const char* data) {",
@@ -2040,6 +2074,12 @@ impl CGen {
             "str_len" => format!("(int32_t)strlen({a})"),
             "argv" => format!("__xlang_argv_g[{a}]"),
             "print_raw" => format!("printf(\"%s\", {a})"),
+            // assert(cond) → runtime check + exit on failure. The condition is
+            // evaluated as a C truthy int. Returns 0 so the call can sit in any
+            // expression position (typically a statement).
+            "assert" => format!("(__xlang_assert(({a}), \"assertion failed\"), 0)"),
+            // panic(msg) → print + exit (never returns at runtime).
+            "panic" => format!("(__xlang_panic({a}), 0)"),
             "int_to_str" => format!("__xlang_int_to_str({a})"),
             "float_to_str" => format!("__xlang_float_to_str({a})"),
             "int_to_f64" => format!("(double)({a})"),
@@ -2437,6 +2477,9 @@ impl CGen {
             "tty" => "__xlang_tty()".to_string(),
             "uname_machine" => "__xlang_uname_machine()".to_string(),
             "rbuf_str" => "__xlang_rbuf_str()".to_string(),
+            // unreachable() → runtime abort (prints + exits). The trailing 0
+            // lets it sit in any expression position.
+            "unreachable" => "(__xlang_unreachable_(), 0)".to_string(),
             _ => return Ok(None),
         }))
     }
@@ -2729,6 +2772,19 @@ mod tests {
         assert!(
             c.contains("return __xlang_method_Point_sq(p);"),
             "method call should dispatch to the mangled function with receiver: {c}"
+        );
+    }
+
+    #[test]
+    fn lowers_if_let_to_match_with_temp() {
+        // `if let Some(v) = func() { .. }` desugars to a match whose scrutinee
+        // is a call; codegen binds it to a typed temp so it can read .some.
+        let c = gen_c_typed(
+            "module main\nfn f(): Option<i32> { return Some(1) }\nfn main(): i32 { if let Some(v) = f() { return v } return 0 }",
+        );
+        assert!(
+            c.contains("__xlang_m") && c.contains(".some"),
+            "if let on a call should bind a temp and test the discriminant: {c}"
         );
     }
 

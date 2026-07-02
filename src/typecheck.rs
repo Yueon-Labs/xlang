@@ -82,6 +82,46 @@ impl TypeMap {
                 _ => None,
             })
     }
+
+    /// Reconstruct a `TypeNode` for an expression's inferred type, when possible
+    /// (Unknown / Const / array-literal types have no node). Lets codegen bind
+    /// an arbitrary expression to a typed temp — e.g. so `match func() { ... }`
+    /// and `if let Pat = func() { ... }` work, not just `match var { ... }`.
+    pub fn type_node(&self, expr: &Spanned<Expr>) -> Option<TypeNode> {
+        self.0
+            .get(&(expr as *const Spanned<Expr> as usize))
+            .and_then(checked_type_to_node)
+    }
+}
+
+/// Inverse of `type_from_node`: best-effort `CheckedType` → `TypeNode` for the
+/// cases codegen needs to bind a typed temporary.
+fn checked_type_to_node(ty: &CheckedType) -> Option<TypeNode> {
+    let node = match ty {
+        CheckedType::IntLiteral => TypeNode::TypeExpr {
+            name: "i32".to_string(),
+            args: vec![],
+        },
+        CheckedType::FloatLiteral => TypeNode::TypeExpr {
+            name: "f64".to_string(),
+            args: vec![],
+        },
+        CheckedType::StringLiteral => TypeNode::TypeExpr {
+            name: "String".to_string(),
+            args: vec![],
+        },
+        CheckedType::Named { name, args } => TypeNode::TypeExpr {
+            name: name.clone(),
+            args: args
+                .iter()
+                .map(checked_type_to_node)
+                .collect::<Option<_>>()?,
+        },
+        CheckedType::Unknown | CheckedType::Const(_) | CheckedType::ArrayLiteral(_) => {
+            return None;
+        }
+    };
+    Some(node)
 }
 
 /// Type-check `program`, returning all accumulated diagnostics (empty = clean).
