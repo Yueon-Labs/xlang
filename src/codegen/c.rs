@@ -2150,6 +2150,10 @@ impl CGen {
             "int_to_str" => format!("__xlang_int_to_str({a})"),
             "float_to_str" => format!("__xlang_float_to_str({a})"),
             "int_to_f64" => format!("(double)({a})"),
+            // int_to_i64 → widen an i32 to i64 (a C cast). Previously this was
+            // in the typecheck builtin table but NOT lowered here, so it emitted
+            // an undefined `int_to_i64(...)` call and failed to link.
+            "int_to_i64" => format!("(int64_t)({a})"),
             "sha256_hex" => format!("__xlang_sha256_hex({a})"),
             "md5_hex" => format!("__xlang_md5_hex({a})"),
             "sha1_hex" => format!("__xlang_sha1_hex({a})"),
@@ -2901,6 +2905,19 @@ mod tests {
         assert!(
             c.contains("x >= 3 && x <= 5"),
             "inclusive range should lower to <=: {c}"
+        );
+    }
+
+    #[test]
+    fn lowers_int_to_i64_to_cast() {
+        // int_to_i64 was in the type table but not lowered → undefined symbol.
+        // It must lower to a C cast, not a function call.
+        let c = gen_c(
+            "module main\nfn widen(x: i32): i64 { return int_to_i64(x) }\nfn main(): i32 { return 0 }",
+        );
+        assert!(
+            c.contains("(int64_t)(x)") && !c.contains("int_to_i64("),
+            "int_to_i64 should lower to a cast: {c}"
         );
     }
 
