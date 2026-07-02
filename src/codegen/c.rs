@@ -806,25 +806,42 @@ impl CGen {
             return self.gen_range_for(iterator, start, end, *inclusive, body);
         }
 
-        let Expr::Identifier {
-            name: iterable_name,
-        } = &iterable.node
+        // Resolve the iterable's type: from a typed variable, or (for arbitrary
+        // expressions like `for x in self.items` / `for x in get_vec()`) from the
+        // type map. Lifts the old identifier-only restriction.
+        let iter_ty = if let Expr::Identifier { name } = &iterable.node {
+            self.lookup_var(name).cloned()
+        } else {
+            self.types.type_node(iterable)
+        };
+        let Some(TypeNode::TypeExpr {
+            name: ty_name,
+            args,
+        }) = iter_ty
         else {
             return Err(XError::Codegen(
-                "C backend only supports `for value in values` where values is an identifier"
+                "for-in iterable has an unknown type (annotate it or bind it to a variable first)"
                     .to_string(),
             ));
         };
-
-        let Some(TypeNode::TypeExpr { name, args }) = self.lookup_var(iterable_name) else {
-            return Err(XError::Codegen(format!(
-                "unknown iterable {iterable_name:?} in for loop"
-            )));
+        // A non-identifier iterable is bound to a temp so it is evaluated once
+        // and `.len` / `.data` refer to a stable lvalue. (Identifiers are
+        // already lvalues, so no temp.)
+        let iter_c = if let Expr::Identifier { name } = &iterable.node {
+            name.clone()
+        } else {
+            let c_ty = self.c_type(&TypeNode::TypeExpr {
+                name: ty_name.clone(),
+                args: args.clone(),
+            })?;
+            let temp = self.next_temp("it");
+            let init = self.gen_expr(iterable)?;
+            self.emit(&format!("{c_ty} {temp} = {init};"));
+            temp
         };
-        let iter_c = self.gen_expr(iterable)?;
         // Loop bound + element source differ: Slice uses a runtime `.len`;
         // Array<T, N> uses the compile-time N. Both store elements in `.data`.
-        let (elem_ty, bound, data) = match (name.as_str(), args.len()) {
+        let (elem_ty, bound, data) = match (ty_name.as_str(), args.len()) {
             ("Slice", 1) => (
                 args[0].clone(),
                 format!("{iter_c}.len"),
@@ -841,7 +858,7 @@ impl CGen {
             ),
             _ => {
                 return Err(XError::Codegen(format!(
-                    "C backend only supports for-in over Slice<T> or Array<T, N>, got {name}<...>"
+                    "C backend only supports for-in over Slice<T> or Array<T, N>, got {ty_name}<...>"
                 )));
             }
         };
@@ -2429,6 +2446,11 @@ impl CGen {
         if field != "push" || args.len() != 1 {
             return Ok(None);
         }
+        // `push` mutates the Vec in place via its address, so the receiver must
+        // be a variable the caller owns. A field-access receiver
+        // (`self.items.push(x)`) is intentionally NOT supported: methods take
+        // `self` by value, so the mutation wouldn't persist (it would touch a
+        // copy's descriptor). Mutate a local Vec instead.
         let Expr::Identifier { name: vname } = &object.node else {
             return Ok(None);
         };
@@ -2805,6 +2827,19 @@ mod tests {
         assert!(
             vec_pos < struct_pos,
             "Vec_i32 typedef should precede the Bag struct that uses it: {c}"
+        );
+    }
+
+    #[test]
+    fn lowers_for_in_over_field_access() {
+        // `for v in self.items` (a field-access iterable) binds a temp and
+        // iterates it — the iterable no longer has to be a bare identifier.
+        let c = gen_c_typed(
+            "module main\nstruct B { xs: Vec<i32> }\nimpl B { fn s(self: B): i32 { let mut t: i32 = 0 for v in self.xs { t += v } return t } }\nfn main(): i32 { return 0 }",
+        );
+        assert!(
+            c.contains("__xlang_it") && c.contains(".len;"),
+            "for-in over a field should bind a temp and use .len: {c}"
         );
     }
 
