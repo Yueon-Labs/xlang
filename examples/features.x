@@ -59,6 +59,15 @@ fn main(): i32 {
         _ => { print_raw("other\n") }
     }
 
+    // -- match with OR-patterns and ranges --
+    let n: i32 = 7
+    match n {
+        0 | 1 => { print_raw("boolean-ish\n") }
+        2..=9 => { print_raw("single digit\n") }   // 7 matches here
+        10..99 => { print_raw("two digits\n") }
+        _ => { print_raw("big\n") }
+    }
+
     // -- match with string literals --
     let word: String = "hello"
     match word {

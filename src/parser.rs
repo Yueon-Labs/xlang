@@ -187,6 +187,21 @@ impl Parser {
         }
     }
 
+    /// Consume an integer-literal token and return its text (used for the end
+    /// of a range pattern `start..end` / `start..=end`).
+    fn expect_int_text(&mut self) -> Result<String, Diagnostic> {
+        let tok = self.peek();
+        if tok.kind == TokenKind::Int {
+            Ok(self.bump().text)
+        } else {
+            Err(Diagnostic::error(
+                ErrorCode::ParseExpectedToken,
+                self.tok_span(tok),
+                format!("expected integer, got {:?}", tok.text),
+            ))
+        }
+    }
+
     fn parse_module_decl(&mut self) -> Result<ModuleDecl, Diagnostic> {
         self.expect("module")?;
         Ok(ModuleDecl {
@@ -560,14 +575,45 @@ impl Parser {
     }
 
     fn parse_pattern(&mut self) -> Result<Pattern, Diagnostic> {
+        let first = self.parse_pattern_atom()?;
+        // OR-pattern: `a | b | c`
+        if self.check("|") {
+            let mut alternatives = vec![first];
+            while self.match_text("|") {
+                alternatives.push(self.parse_pattern_atom()?);
+            }
+            return Ok(Pattern::OrPattern { alternatives });
+        }
+        Ok(first)
+    }
+
+    /// Parse a single pattern atom: `_`, int literal (possibly a range
+    /// `a..b`/`a..=b`), string literal, or a variant with optional bindings.
+    fn parse_pattern_atom(&mut self) -> Result<Pattern, Diagnostic> {
         // Wildcard: identifier "_"
         if self.peek().kind == TokenKind::Ident && self.peek().text == "_" {
             self.bump();
             return Ok(Pattern::WildcardPattern);
         }
-        // Integer literal
+        // Integer literal, possibly the start of a range (`1..=5` / `1..5`).
         if self.peek().kind == TokenKind::Int {
             let text = self.bump().text;
+            if self.match_text("..=") {
+                let end = self.expect_int_text()?;
+                return Ok(Pattern::RangePattern {
+                    start: text,
+                    end,
+                    inclusive: true,
+                });
+            }
+            if self.match_text("..") {
+                let end = self.expect_int_text()?;
+                return Ok(Pattern::RangePattern {
+                    start: text,
+                    end,
+                    inclusive: false,
+                });
+            }
             return Ok(Pattern::LiteralPattern { value: text });
         }
         // String literal
@@ -575,7 +621,7 @@ impl Parser {
             let text = self.bump().text;
             return Ok(Pattern::LiteralPattern { value: text });
         }
-        // Existing: identifier (variant pattern with optional bindings)
+        // Variant pattern with optional bindings.
         let name = self.expect_ident()?.text;
         let mut bindings = Vec::new();
         if self.match_text("(") {

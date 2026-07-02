@@ -920,6 +920,64 @@ impl CGen {
         Ok(())
     }
 
+    /// The C condition for a literal-match pattern, or `None` for a wildcard
+    /// (the fall-through arm). Handles literals, OR-patterns (`a | b`), and
+    /// integer ranges (`a..b` / `a..=b`).
+    fn pattern_cond(
+        &self,
+        pattern: &crate::ast::Pattern,
+        scrut_c: &str,
+        is_string: bool,
+        ty_name: &str,
+    ) -> XResult<Option<String>> {
+        use crate::ast::Pattern;
+        let cond = match pattern {
+            Pattern::LiteralPattern { value: lit } => {
+                if is_string {
+                    format!("strcmp({scrut_c}, \"{lit}\") == 0")
+                } else {
+                    format!("{scrut_c} == {lit}")
+                }
+            }
+            Pattern::OrPattern { alternatives } => {
+                let parts: Vec<String> = alternatives
+                    .iter()
+                    .filter_map(|a| {
+                        self.pattern_cond(a, scrut_c, is_string, ty_name)
+                            .transpose()
+                    })
+                    .collect::<Result<_, _>>()?;
+                if parts.is_empty() {
+                    return Ok(None);
+                }
+                parts.join(" || ")
+            }
+            Pattern::RangePattern {
+                start,
+                end,
+                inclusive,
+            } => {
+                if is_string {
+                    return Err(XError::Codegen(format!(
+                        "range pattern not supported in match on {ty_name}"
+                    )));
+                }
+                if *inclusive {
+                    format!("({scrut_c} >= {start} && {scrut_c} <= {end})")
+                } else {
+                    format!("({scrut_c} >= {start} && {scrut_c} < {end})")
+                }
+            }
+            Pattern::WildcardPattern => return Ok(None),
+            Pattern::VariantPattern { name, .. } => {
+                return Err(XError::Codegen(format!(
+                    "variant pattern {name:?} not supported in literal match on {ty_name}"
+                )));
+            }
+        };
+        Ok(Some(cond))
+    }
+
     /// Lower `match scrut { Some/Ok(v) => .., None/Err(..) => .. }` to a C
     /// `if/else` on the discriminant. v1: `scrut` must be a variable of type
     /// `Option<T>` or `Result<T, E>`.
@@ -930,42 +988,29 @@ impl CGen {
         arms: &[MatchArm],
         ty_name: &str,
     ) -> XResult<()> {
-        use crate::ast::Pattern;
         let scrut_c = self.gen_expr(value)?;
         let is_string = matches!(ty_name, "String" | "Str");
         let mut first = true;
         let mut wildcard_body: Option<&crate::ast::Block> = None;
 
         for arm in arms {
-            match &arm.pattern {
-                Pattern::LiteralPattern { value: lit } => {
-                    let cond = if is_string {
-                        format!("strcmp({scrut_c}, \"{lit}\") == 0")
-                    } else {
-                        format!("{scrut_c} == {lit}")
-                    };
-                    if first {
-                        self.emit(&format!("if ({cond}) {{"));
-                        first = false;
-                    } else {
-                        self.emit(&format!("}} else if ({cond}) {{"));
-                    }
-                    self.indent += 1;
-                    self.push_scope();
-                    for inner in &arm.body.statements {
-                        self.gen_stmt(inner)?;
-                    }
-                    self.pop_scope();
-                    self.indent -= 1;
+            if let Some(cond) = self.pattern_cond(&arm.pattern, &scrut_c, is_string, ty_name)? {
+                if first {
+                    self.emit(&format!("if ({cond}) {{"));
+                    first = false;
+                } else {
+                    self.emit(&format!("}} else if ({cond}) {{"));
                 }
-                Pattern::WildcardPattern => {
-                    wildcard_body = Some(&arm.body);
+                self.indent += 1;
+                self.push_scope();
+                for inner in &arm.body.statements {
+                    self.gen_stmt(inner)?;
                 }
-                Pattern::VariantPattern { name, .. } => {
-                    return Err(XError::Codegen(format!(
-                        "variant pattern {name:?} not supported in literal match on {ty_name}"
-                    )));
-                }
+                self.pop_scope();
+                self.indent -= 1;
+            } else {
+                // Wildcard (or unsupported) — the fall-through arm.
+                wildcard_body = Some(&arm.body);
             }
         }
 
@@ -2840,6 +2885,22 @@ mod tests {
         assert!(
             c.contains("__xlang_it") && c.contains(".len;"),
             "for-in over a field should bind a temp and use .len: {c}"
+        );
+    }
+
+    #[test]
+    fn lowers_match_or_and_range_patterns() {
+        // `1 | 2` → `(x == 1 || x == 2)`; `3..=5` → `(x >= 3 && x <= 5)`.
+        let c = gen_c(
+            "module main\nfn f(x: i32): i32 { match x { 1 | 2 => { return 1 } 3..=5 => { return 2 } _ => { return 0 } } }\nfn main(): i32 { return 0 }",
+        );
+        assert!(
+            c.contains("x == 1 || x == 2"),
+            "OR pattern should lower to ||: {c}"
+        );
+        assert!(
+            c.contains("x >= 3 && x <= 5"),
+            "inclusive range should lower to <=: {c}"
         );
     }
 
