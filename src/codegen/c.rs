@@ -2413,12 +2413,23 @@ impl CGen {
                     .to_string(),
             )),
             Expr::BinaryExpr { op, left, right } => {
+                let str_operand = self.types.is_string(left) || self.types.is_string(right);
                 // `+` on strings lowers to __xlang_str_concat (decided by the
                 // type map: an operand inferred as String makes this a concat).
-                if op == "+" && (self.types.is_string(left) || self.types.is_string(right)) {
+                if op == "+" && str_operand {
                     let l = self.gen_expr(left)?;
                     let r = self.gen_expr(right)?;
                     Ok(format!("__xlang_str_concat({l}, {r})"))
+                }
+                // String comparison (`< <= > >= == !=`) lowers to strcmp(...) <op> 0.
+                // Without this, `s1 == s2` would be C pointer comparison (a bug —
+                // always false for distinct allocations); strcmp compares content.
+                else if matches!(op.as_str(), "<" | "<=" | ">" | ">=" | "==" | "!=")
+                    && str_operand
+                {
+                    let l = self.gen_expr(left)?;
+                    let r = self.gen_expr(right)?;
+                    Ok(format!("(strcmp({l}, {r}) {op} 0)"))
                 } else {
                     Ok(format!(
                         "({} {} {})",
@@ -2601,6 +2612,26 @@ mod tests {
         assert!(
             !c2.contains("__xlang_str_concat(a, b)"),
             "numeric + must not call concat: {c2}"
+        );
+    }
+
+    #[test]
+    fn lowers_string_comparison_to_strcmp() {
+        // `s1 < s2` → strcmp(s1, s2) < 0 ; `s1 == s2` → strcmp(s1, s2) == 0
+        // (without this, == would be C pointer comparison — a latent bug).
+        let c = gen_c_typed(
+            "module main\nfn lt(a: String, b: String): bool { return a < b }\nfn main(): i32 { return 0 }",
+        );
+        assert!(
+            c.contains("return (strcmp(a, b) < 0);"),
+            "string < should lower to strcmp: {c}"
+        );
+        let c2 = gen_c_typed(
+            "module main\nfn eq(a: String, b: String): bool { return a == b }\nfn main(): i32 { return 0 }",
+        );
+        assert!(
+            c2.contains("return (strcmp(a, b) == 0);"),
+            "string == should lower to strcmp: {c2}"
         );
     }
 

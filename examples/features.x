@@ -110,6 +110,15 @@ fn main(): i32 {
     print_raw("Hello, " + who + "!" + " (" + int_to_str(str_len(who)) + " letters)")
     print_raw("\n")
 
+    // -- string comparison (`< <= > >= == !=` → strcmp) --
+    // Lexicographic ordering and content equality. `==` compares content, not
+    // pointers, so two equal strings test equal.
+    let x: String = "apple"
+    let y: String = "banana"
+    let z: String = "apple"
+    if x < y { print_raw("apple<banana\n") }
+    if x == z { print_raw("apple==apple (content)\n") }
+
     // -- math builtins --
     print_raw("abs(-7)=")
     print_raw(int_to_str(abs(-7)))

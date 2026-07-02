@@ -486,8 +486,35 @@ impl Checker {
                 self.infer_numeric_result(op, &left_ty, &right_ty, span)
             }
             ">" | ">=" | "<" | "<=" => {
-                self.expect_numeric_pair(op, &left_ty, &right_ty, span);
-                CheckedType::named("bool")
+                // String ordering (`s1 < s2`, etc.) compares lexicographically
+                // via strcmp in codegen. A concretely non-string operand
+                // alongside a string is a type error; Unknown passes through.
+                if left_ty.is_string() || right_ty.is_string() {
+                    if !left_ty.is_string() && !left_ty.is_unknown() {
+                        self.emit(
+                            span,
+                            ErrorCode::TypeOperatorMismatch,
+                            format!(
+                                "cannot compare String with {} using {op}",
+                                left_ty.display()
+                            ),
+                        );
+                    }
+                    if !right_ty.is_string() && !right_ty.is_unknown() {
+                        self.emit(
+                            span,
+                            ErrorCode::TypeOperatorMismatch,
+                            format!(
+                                "cannot compare String with {} using {op}",
+                                right_ty.display()
+                            ),
+                        );
+                    }
+                    CheckedType::named("bool")
+                } else {
+                    self.expect_numeric_pair(op, &left_ty, &right_ty, span);
+                    CheckedType::named("bool")
+                }
             }
             "==" | "!=" => {
                 if !left_ty.is_unknown()
@@ -1439,6 +1466,42 @@ fn main(): i32 {
         assert!(
             first_message(&diags).contains("cannot concatenate String with i32"),
             "should reject String + str_len (i32 builtin): {diags:?}"
+        );
+    }
+
+    #[test]
+    fn accepts_string_ordering_and_equality() {
+        // `<`, `<=`, `>`, `>=`, `==`, `!=` on strings all typecheck as bool.
+        let diags = check_source(
+            r#"
+module main
+fn cmp(a: String, b: String): bool {
+    return a < b && a <= b && a > b && a >= b && a == b && a != b
+}
+fn main(): i32 { return 0 }
+"#,
+        );
+        assert!(
+            diags.items.is_empty(),
+            "string comparisons should typecheck: {diags:?}"
+        );
+    }
+
+    #[test]
+    fn rejects_string_ordering_with_integer() {
+        let diags = check_source(
+            r#"
+module main
+fn main(): i32 {
+    let s: String = "x"
+    if s < 5 { return 1 }
+    return 0
+}
+"#,
+        );
+        assert!(
+            first_message(&diags).contains("cannot compare String with integer literal using <"),
+            "should reject String < int: {diags:?}"
         );
     }
 
