@@ -242,6 +242,7 @@ impl Lexer {
     fn match_multi_symbol(&mut self) -> Option<String> {
         for sym in [
             "=>", "==", "!=", ">=", "<=", "&&", "||", "+=", "-=", "*=", "/=", "%=", "<<", ">>",
+            "..",
         ] {
             let sym_chars: Vec<char> = sym.chars().collect();
             if self.chars.get(self.i..self.i + sym_chars.len()) == Some(sym_chars.as_slice()) {
@@ -311,6 +312,20 @@ mod tests {
                 "=>", "==", "!=", ">=", "<=", "&&", "||", "+=", "-=", "<eof>"
             ]
         );
+    }
+
+    #[test]
+    fn lexes_range_operator() {
+        // `0..10` must NOT be swallowed as a float: the number lexer only
+        // extends past '.' when the next char is a digit, so `0` is an int and
+        // `..` is its own symbol.
+        let (toks, _) = lex("0..10");
+        let texts: Vec<&str> = toks.iter().map(|t| t.text.as_str()).collect();
+        assert_eq!(texts, vec!["0", "..", "10", "<eof>"]);
+        // A single dot (field access) is unaffected by adding `..`.
+        let (toks2, _) = lex("a.b");
+        let texts2: Vec<&str> = toks2.iter().map(|t| t.text.as_str()).collect();
+        assert_eq!(texts2, vec!["a", ".", "b", "<eof>"]);
     }
 
     #[test]

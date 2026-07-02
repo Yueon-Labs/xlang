@@ -3,6 +3,14 @@ use crate::error::{XError, XResult};
 use crate::source::Spanned;
 use std::collections::{BTreeMap, HashMap, HashSet};
 
+/// Build the `i32` type node (used e.g. for numeric range-loop iterators).
+fn i32_type() -> TypeNode {
+    TypeNode::TypeExpr {
+        name: "i32".to_string(),
+        args: vec![],
+    }
+}
+
 #[derive(Default)]
 pub struct CGen {
     lines: Vec<String>,
@@ -701,6 +709,11 @@ impl CGen {
         iterable: &Spanned<Expr>,
         body: &Block,
     ) -> XResult<()> {
+        // Numeric range `for i in start..end` -> C `for (i = start; i < end; i++)`.
+        if let Expr::RangeExpr { start, end } = &iterable.node {
+            return self.gen_range_for(iterator, start, end, body);
+        }
+
         let Expr::Identifier {
             name: iterable_name,
         } = &iterable.node
@@ -754,6 +767,42 @@ impl CGen {
             self.gen_stmt(inner)?;
         }
         self.pop_scope();
+        self.indent -= 1;
+        self.emit("}");
+        Ok(())
+    }
+
+    /// Lower `for i in start..end` to a C numeric for loop. The end bound is
+    /// captured into a temp once so a loop like `for i in 0..vec.len` evaluates
+    /// the bound a single time (matching the for-in-over-collection semantics,
+    /// where the bound is fixed at loop entry).
+    fn gen_range_for(
+        &mut self,
+        iterator: &str,
+        start: &Spanned<Expr>,
+        end: &Spanned<Expr>,
+        body: &Block,
+    ) -> XResult<()> {
+        let start_c = self.gen_expr(start)?;
+        let end_c = self.gen_expr(end)?;
+        let end_tmp = self.next_temp("rg_end");
+        // Wrap in a block so the captured bound temp doesn't leak, and so the
+        // iterator name can shadow an outer variable of the same name safely.
+        self.emit("{");
+        self.indent += 1;
+        self.emit(&format!("int32_t {end_tmp} = {end_c};"));
+        self.emit(&format!(
+            "for (int32_t {iterator} = {start_c}; {iterator} < {end_tmp}; {iterator}++) {{"
+        ));
+        self.indent += 1;
+        self.push_scope();
+        self.declare_var(iterator, i32_type());
+        for inner in &body.statements {
+            self.gen_stmt(inner)?;
+        }
+        self.pop_scope();
+        self.indent -= 1;
+        self.emit("}");
         self.indent -= 1;
         self.emit("}");
         Ok(())
@@ -2390,6 +2439,10 @@ impl CGen {
                     self.gen_expr(index)?
                 ))
             }
+            Expr::RangeExpr { .. } => Err(XError::Codegen(
+                "range expressions (a..b) are only supported as the iterable of a `for` loop"
+                    .to_string(),
+            )),
         }
     }
 }
@@ -2454,6 +2507,21 @@ mod tests {
         );
         assert!(c.contains("< 3;"), "no array bound N: {c}");
         assert!(c.contains(".data["), "no .data index: {c}");
+    }
+
+    #[test]
+    fn lowers_numeric_range_for_loop() {
+        // `for i in 0..n` -> C `for (i = 0; i < bound; i++)`, with the end
+        // captured once into a temp so the bound is fixed at loop entry.
+        let c = gen_c(
+            "module main\nfn sum(n: i32): i32 { let mut s: i32 = 0 for i in 0..n { s += i } return s } fn main(): i32 { return sum(5) }",
+        );
+        assert!(c.contains("__xlang_rg_end"), "no captured range bound: {c}");
+        assert!(
+            c.contains("for (int32_t i = 0; i < __xlang_rg_end"),
+            "no numeric for-loop: {c}"
+        );
+        assert!(c.contains("i++)"), "no increment: {c}");
     }
 
     #[test]

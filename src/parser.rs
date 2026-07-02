@@ -411,7 +411,7 @@ impl Parser {
         self.expect("for")?;
         let iterator = self.expect_ident()?.text;
         self.expect("in")?;
-        let iterable = self.parse_expr()?;
+        let iterable = self.parse_for_iterable()?;
         let body = self.parse_block()?;
         Ok(Spanned::new(
             Stmt::ForStmt {
@@ -421,6 +421,27 @@ impl Parser {
             },
             self.span_from(start),
         ))
+    }
+
+    /// Parse the iterable of a `for` loop. Accepts either a collection
+    /// expression (`for x in vec`) or an exclusive numeric range
+    /// (`for i in 0..n`), lowered to `RangeExpr`. The range form is detected
+    /// after parsing the start expression: `..` is not part of any precedence
+    /// level, so `parse_expr` stops cleanly at it.
+    fn parse_for_iterable(&mut self) -> Result<Spanned<Expr>, Diagnostic> {
+        let start_span = self.cur_start();
+        let begin = self.parse_expr()?;
+        if self.match_text("..") {
+            let end = self.parse_expr()?;
+            return Ok(Spanned::new(
+                Expr::RangeExpr {
+                    start: Box::new(begin),
+                    end: Box::new(end),
+                },
+                self.span_from(start_span),
+            ));
+        }
+        Ok(begin)
     }
 
     fn parse_while_stmt(&mut self) -> Result<Spanned<Stmt>, Diagnostic> {

@@ -205,28 +205,35 @@ impl Checker {
                 iterable,
                 body,
             } => {
+                // `for i in start..end`: numeric range. infer_expr validates the
+                // two ends; the iterator is an i32.
+                let is_range = matches!(&iterable.node, Expr::RangeExpr { .. });
                 let iterable_ty = self.infer_expr(iterable);
-                let iterator_ty = match &iterable_ty {
-                    CheckedType::Named { name, args } if name == "Slice" && args.len() == 1 => {
-                        args[0].clone()
-                    }
-                    CheckedType::Named { name, args } if name == "Array" && args.len() == 2 => {
-                        args[0].clone()
-                    }
-                    CheckedType::Named { name, args } if name == "Vec" && args.len() == 1 => {
-                        args[0].clone()
-                    }
-                    CheckedType::Unknown => CheckedType::Unknown,
-                    other => {
-                        self.emit(
-                            iterable.span,
-                            ErrorCode::TypeForInExpectsSlice,
-                            format!(
-                                "for-in expects Slice<T> or Array<T, N>, got {}",
-                                other.display()
-                            ),
-                        );
-                        CheckedType::Unknown
+                let iterator_ty = if is_range {
+                    CheckedType::named("i32")
+                } else {
+                    match &iterable_ty {
+                        CheckedType::Named { name, args } if name == "Slice" && args.len() == 1 => {
+                            args[0].clone()
+                        }
+                        CheckedType::Named { name, args } if name == "Array" && args.len() == 2 => {
+                            args[0].clone()
+                        }
+                        CheckedType::Named { name, args } if name == "Vec" && args.len() == 1 => {
+                            args[0].clone()
+                        }
+                        CheckedType::Unknown => CheckedType::Unknown,
+                        other => {
+                            self.emit(
+                                iterable.span,
+                                ErrorCode::TypeForInExpectsSlice,
+                                format!(
+                                    "for-in expects Slice<T>, Array<T, N>, or a..b range, got {}",
+                                    other.display()
+                                ),
+                            );
+                            CheckedType::Unknown
+                        }
                     }
                 };
                 self.push_scope();
@@ -392,6 +399,17 @@ impl Checker {
                         CheckedType::Unknown
                     }
                 }
+            }
+            // A numeric range `start..end`. Only meaningful as a `for`-loop
+            // iterable; infer_expr validates both ends are numeric. The range
+            // itself is not a first-class value (CheckedType::Unknown), so using
+            // one elsewhere is caught downstream.
+            Expr::RangeExpr { start, end } => {
+                let start_ty = self.infer_expr(start);
+                let end_ty = self.infer_expr(end);
+                self.expect_numeric(&start_ty, "range start", start.span);
+                self.expect_numeric(&end_ty, "range end", end.span);
+                CheckedType::Unknown
             }
         }
     }
@@ -1216,7 +1234,51 @@ fn main(): i32 {
 }
 "#,
         );
-        assert!(first_message(&diags).contains("for-in expects Slice<T> or Array<T, N>, got i32"));
+        assert!(first_message(&diags).contains("or a..b range, got i32"));
+    }
+
+    #[test]
+    fn accepts_numeric_range_for_loop() {
+        // `for i in 0..n` typechecks cleanly and the iterator is usable as an i32
+        // (here: as an array index and in arithmetic).
+        let diags = check_source(
+            r#"
+module main
+
+fn main(): i32 {
+    let n: i32 = 3
+    let mut s: i32 = 0
+    for i in 0..n {
+        s = s + i
+    }
+    return s
+}
+"#,
+        );
+        assert!(
+            diags.items.is_empty(),
+            "range for-loop should typecheck: {diags:?}"
+        );
+    }
+
+    #[test]
+    fn rejects_non_numeric_range_bound() {
+        let diags = check_source(
+            r#"
+module main
+
+fn main(): i32 {
+    for i in 0.."oops" {
+        return i
+    }
+    return 0
+}
+"#,
+        );
+        assert!(
+            first_message(&diags).contains("range end"),
+            "should flag non-numeric range end: {diags:?}"
+        );
     }
 
     #[test]

@@ -190,4 +190,11 @@ pub enum Expr {
         object: Box<Spanned<Expr>>,
         index: Box<Spanned<Expr>>,
     },
+    /// Numeric range `start..end` (exclusive upper bound). Currently only
+    /// meaningful as the iterable of a `for` loop: `for i in 0..n { ... }`
+    /// lowers to `for (i = start; i < end; i++)`.
+    RangeExpr {
+        start: Box<Spanned<Expr>>,
+        end: Box<Spanned<Expr>>,
+    },
 }

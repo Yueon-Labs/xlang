@@ -72,6 +72,27 @@ fn main(): i32 {
     print_raw(sb_str())
     print_raw("\n")
 
+    // -- numeric range for-loop (for i in start..end, exclusive) --
+    // Lowers to C `for (i = start; i < end; i++)`. Compound assignment (+=, *=)
+    // desugars to `x = x <op> y`.
+    let mut sum: i32 = 0
+    for i in 0..101 {
+        sum += i
+    }
+    print_raw("sum 0..100 = ")
+    print_raw(int_to_str(sum))
+    print_raw("\n")
+
+    // range with an expression end + compound *=: factorial of 6 = 720
+    let mut fact: i32 = 1
+    let n: i32 = 7
+    for k in 1..n {
+        fact *= k
+    }
+    print_raw("6! = ")
+    print_raw(int_to_str(fact))
+    print_raw("\n")
+
     // -- string builtins --
     let s: String = "Hello World"
     print_raw(str_lower(s))
