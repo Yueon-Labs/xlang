@@ -2947,8 +2947,14 @@ mod tests {
             "module main\nfn mul(a: i32, b: i32): i32 { return a * b }\nfn main(): i32 { return 0 }",
         );
         assert!(
-            c2.contains("return (a * b)") && !c2.contains("__xlang_str_repeat"),
+            c2.contains("return (a * b)"),
             "numeric * should stay a multiply: {c2}"
+        );
+        // The runtime always *defines* __xlang_str_repeat, so check the call
+        // site, not the bare name.
+        assert!(
+            !c2.contains("__xlang_str_repeat(a, b)"),
+            "numeric * must not call str_repeat: {c2}"
         );
     }
 
