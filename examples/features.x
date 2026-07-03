@@ -10,6 +10,17 @@ enum Color {
     Blue
 }
 
+// Methods on Color reuse the impl machinery (the receiver's type dispatches).
+impl Color {
+    fn name(self: Color): String {
+        match self {
+            Red => { return "red" }
+            Green => { return "green" }
+            Blue => { return "blue" }
+        }
+    }
+}
+
 struct Point {
     x: i32
     y: i32
@@ -83,13 +94,14 @@ fn main(): i32 {
         _ => { print_raw("unknown\n") }
     }
 
-    // -- unit-variant enum --
+    // -- unit-variant enum (+ methods, via impl) --
     let c: Color = Green
     match c {
         Red => { print_raw("color: red\n") }
         Green => { print_raw("color: green\n") }
         Blue => { print_raw("color: blue\n") }
     }
+    print_str("via method: " + c.name() + "\n")   // via method: green
 
     // -- f64 arithmetic + float_to_str --
     let pi: f64 = 3.14159
