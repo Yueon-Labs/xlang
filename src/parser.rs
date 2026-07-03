@@ -696,6 +696,12 @@ impl Parser {
             self.bump();
             return Ok(Pattern::WildcardPattern);
         }
+        // Negative integer literal: `-1`, `-42`, etc.
+        if self.check("-") && self.token_at(1).kind == TokenKind::Int {
+            self.bump(); // consume '-'
+            let text = format!("-{}", self.bump().text);
+            return Ok(Pattern::LiteralPattern { value: text });
+        }
         // Integer literal, possibly the start of a range (`1..=5` / `1..5`).
         if self.peek().kind == TokenKind::Int {
             let text = self.bump().text;
