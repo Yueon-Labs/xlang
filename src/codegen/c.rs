@@ -137,6 +137,7 @@ impl CGen {
         self.emit("#include <unistd.h>");
         self.emit("#include <pwd.h>");
         self.emit("#include <grp.h>");
+        self.emit("#include <utmp.h>");
         self.emit("#endif");
         self.emit("");
         self.emit_runtime_preamble();
@@ -2030,7 +2031,33 @@ impl CGen {
             "    char* e = (char*)malloc(1); e[0] = 0; return e;",
             "#endif",
             "}",
-            "// Zero-copy stdin→stdout via sendfile (Linux). Returns bytes sent, or -1",
+            "// Read all USER_PROCESS entries from /var/run/utmp (Linux). Returns a",
+            "// newline-separated string, each line: \"user\\tline\\ttime_sec\". Empty",
+            "// string on failure/non-Linux. For `who` and `users`.",
+            "char* __xlang_read_utmp() {",
+            "#ifdef __linux__",
+            "    setutent();",
+            "    size_t cap = 1024, len = 0;",
+            "    char* buf = (char*)malloc(cap);",
+            "    buf[0] = 0;",
+            "    struct utmp* u;",
+            "    while ((u = getutent()) != NULL) {",
+            "        if (u->ut_type != 7) continue;",
+            "        if (u->ut_user[0] == 0) continue;",
+            "        char line[512];",
+            "        int n = snprintf(line, sizeof(line), \"%s\\t%s\\t%d\\n\",",
+            "                        u->ut_user, u->ut_line, (int)u->ut_tv.tv_sec);",
+            "        if (len + n + 1 > cap) { cap = (len + n + 1) * 2; buf = (char*)realloc(buf, cap); }",
+            "        memcpy(buf + len, line, n);",
+            "        len += n;",
+            "        buf[len] = 0;",
+            "    }",
+            "    endutent();",
+            "    return buf;",
+            "#else",
+            "    char* e = (char*)malloc(1); e[0] = 0; return e;",
+            "#endif",
+            "}",
             "// if sendfile isn't available or failed (pipe stdin, non-Linux) — caller",
             "// falls back to read_stdin+print_raw. For `cat` on file-redirected stdin,",
             "// this matches GNU cat's zero-copy splice (the 6x Linux gap was the",
@@ -2855,6 +2882,7 @@ impl CGen {
             "str_trim" => format!("__xlang_str_trim({a})"),
             "uid_to_name" => format!("__xlang_uid_to_name({a})"),
             "gid_to_name" => format!("__xlang_gid_to_name({a})"),
+            "read_utmp" => "__xlang_read_utmp()".to_string(),
             "time_format" => format!("__xlang_time_format({a})"),
             "time_format_utc" => format!("__xlang_time_format_utc({a})"),
             "str_split" => {
