@@ -1944,7 +1944,43 @@ impl CGen {
             "    out[j] = 0;",
             "    return out;",
             "}",
-            "// cat -A/-E/-T style 'show' of a string: show_tabs=1 → tab as \"^I\",",
+            "// Keep ONLY chars in `set` (delete the complement). For tr -dc (delete",
+            "// everything NOT in set). Inverse of __xlang_str_delete. NUL-safe (C-level",
+            "// table, no complement string that would truncate at NUL in xlang).",
+            "char* __xlang_str_keep(const char* s, const char* set) {",
+            "    int32_t n = (int32_t)strlen(s);",
+            "    unsigned char keep[256];",
+            "    for (int i = 0; i < 256; i++) keep[i] = 0;",
+            "    for (int i = 0; set[i]; i++) keep[(unsigned char)set[i]] = 1;",
+            "    char* out = (char*)malloc(n + 1);",
+            "    int32_t j = 0;",
+            "    for (int32_t i = 0; i < n; i++) {",
+            "        if (keep[(unsigned char)s[i]]) out[j++] = s[i];",
+            "    }",
+            "    out[j] = 0;",
+            "    return out;",
+            "}",
+            "// Translate the COMPLEMENT of `from` (chars NOT in from) to `to`. For tr -c.",
+            "// set2 is extended by repeating its last char to cover all complement chars.",
+            "// Chars IN `from` pass through unchanged.",
+            "char* __xlang_str_translate_complement(const char* s, const char* from, const char* to) {",
+            "    int32_t n = (int32_t)strlen(s);",
+            "    int32_t tn = (int32_t)strlen(to);",
+            "    char last_to = tn > 0 ? to[tn - 1] : 0;",
+            "    unsigned char in_from[256];",
+            "    for (int i = 0; i < 256; i++) in_from[i] = 0;",
+            "    for (int i = 0; from[i]; i++) in_from[(unsigned char)from[i]] = 1;",
+            "    char table[256];",
+            "    int32_t ci = 0;",
+            "    for (int c = 0; c < 256; c++) {",
+            "        if (in_from[c]) { table[c] = (char)c; }",
+            "        else { table[c] = (ci < tn) ? to[ci] : last_to; ci++; }",
+            "    }",
+            "    char* out = (char*)malloc(n + 1);",
+            "    for (int32_t i = 0; i < n; i++) out[i] = table[(unsigned char)s[i]];",
+            "    out[n] = 0;",
+            "    return out;",
+            "}",
             "// show_ends=1 → '$' before each newline. Bulk O(n) in C, vs the per-char",
             "// xlang loop that made cate/showall 3-6x slower than GNU cat -A/-E on Linux.",
             "char* __xlang_cat_show(const char* s, int32_t show_tabs, int32_t show_ends) {",
@@ -2842,6 +2878,21 @@ impl CGen {
                 };
                 let b = self.gen_expr(second)?;
                 format!("__xlang_str_delete({a}, {b})")
+            }
+            "str_keep" => {
+                let Some(second) = args.get(1) else {
+                    return Ok(None);
+                };
+                let b = self.gen_expr(second)?;
+                format!("__xlang_str_keep({a}, {b})")
+            }
+            "str_translate_complement" => {
+                let (Some(second), Some(third)) = (args.get(1), args.get(2)) else {
+                    return Ok(None);
+                };
+                let b = self.gen_expr(second)?;
+                let c = self.gen_expr(third)?;
+                format!("__xlang_str_translate_complement({a}, {b}, {c})")
             }
             "cat_show" => {
                 let (Some(second), Some(third)) = (args.get(1), args.get(2)) else {
