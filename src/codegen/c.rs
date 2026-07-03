@@ -250,13 +250,54 @@ impl CGen {
                 }
             }
         }
-        // Emit wrapper typedefs in dependency order (fixpoint): a wrapper whose
-        // definition references another not-yet-emitted wrapper must wait. This
-        // fixes nested wrappers (e.g. Array<Array<i32>, 3> needs Array_i32 first)
-        // which BTreeMap's alphabetical order would emit backwards.
-        let mut pending = typedefs;
+        // Forward-declare all user structs and payload enums so that recursive
+        // types work: a wrapper like Vec_Tree holds `Tree *data` (pointer), so
+        // a forward decl of Tree suffices for the wrapper — even before Tree's
+        // full definition. Without this, `enum Tree { Branch(BranchData) }`
+        // where BranchData has a `Vec<Tree>` field would deadlock the fixpoint.
+        let mut fwd_decls: Vec<String> = Vec::new();
+        for item in &program.items {
+            match &item.node {
+                Item::StructDecl { name, .. } => {
+                    fwd_decls.push(format!("typedef struct {name} {name};"));
+                }
+                Item::EnumDecl { name, variants }
+                    if variants.iter().any(|v| v.payload.is_some()) =>
+                {
+                    fwd_decls.push(format!("typedef struct {name} {name};"));
+                }
+                _ => {}
+            }
+        }
+
+        // Two-phase fixpoint: Phase 1 emits Vec_/Slice_ wrappers (their element
+        // types are forward-declared → never blocked by structs/enums). Phase 2
+        // emits structs/enums/Array/Option/Result, seeded with phase 1's names.
+        // This breaks recursive cycles through Vec (Vec_Tree → Tree, where Tree
+        // is forward-declared for the pointer, and Tree's full def comes later).
+        let (phase1, phase2): (BTreeMap<String, String>, BTreeMap<String, String>) = typedefs
+            .into_iter()
+            .partition(|(k, _)| k.starts_with("Vec_") || k.starts_with("Slice_"));
+
+        let (mut ordered1, emitted1) = self.typedef_fixpoint(phase1, HashSet::new())?;
+        let (ordered2, _) = self.typedef_fixpoint(phase2, emitted1)?;
+
+        ordered1.extend(ordered2);
+        fwd_decls.extend(ordered1);
+        Ok(fwd_decls)
+    }
+
+    /// Dependency-ordered emission of typedefs: a definition referencing
+    /// another pending definition must wait. Returns the ordered definitions
+    /// and the set of emitted names. `seed` pre-populates `emitted` (used to
+    /// carry phase-1 results into phase-2).
+    fn typedef_fixpoint(
+        &self,
+        mut pending: BTreeMap<String, String>,
+        seed: HashSet<String>,
+    ) -> XResult<(Vec<String>, HashSet<String>)> {
         let mut ordered: Vec<String> = Vec::new();
-        let mut emitted: std::collections::HashSet<String> = std::collections::HashSet::new();
+        let mut emitted = seed;
         while !pending.is_empty() {
             let names: Vec<String> = pending.keys().cloned().collect();
             let mut progressed = false;
@@ -281,7 +322,7 @@ impl CGen {
         for def in pending.into_values() {
             ordered.push(def);
         }
-        Ok(ordered)
+        Ok((ordered, emitted))
     }
 
     fn collect_block_typedefs(
