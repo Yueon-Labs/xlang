@@ -2062,6 +2062,25 @@ impl CGen {
             "    buf[n] = 0;",
             "    return buf;",
             "}",
+            "// Drain ALL currently-buffered data on a non-blocking socket into one",
+            "// owned, growable string (loops recv until it returns <= 0 — EAGAIN on a",
+            "// non-blocking socket, or peer close). Lets a server read a full HTTP",
+            "// request (headers + body) that exceeds recv_str's 64KB single-recv cap.",
+            "// Safe ONLY on non-blocking sockets: a blocking socket would hang here",
+            "// waiting for data that never arrives. Owned malloc'd buffer (unlike the",
+            "// static recv_str buffer, no aliasing across calls).",
+            "char* __xlang_recv_all(int32_t fd) {",
+            "    size_t cap = 65536, len = 0;",
+            "    char* buf = (char*)malloc(cap);",
+            "    buf[0] = 0;",
+            "    for (;;) {",
+            "        if (len + 2 > cap) { cap *= 2; buf = (char*)realloc(buf, cap); }",
+            "        ssize_t n = recv(fd, buf + len, cap - len - 1, 0);",
+            "        if (n > 0) { len += (size_t)n; buf[len] = 0; continue; }",
+            "        break;",
+            "    }",
+            "    return buf;",
+            "}",
             "// Binary-safe byte I/O: a static receive buffer with EXPLICIT lengths,",
             "// so NUL bytes in the stream don't truncate (every string builtin above",
             "// is strlen-terminated and stops at NUL). Used by the reverse proxy to",
@@ -2793,6 +2812,7 @@ impl CGen {
             }
             "accept" => format!("accept({a}, 0, 0)"),
             "recv_str" => format!("__xlang_recv_str({a})"),
+            "recv_all" => format!("__xlang_recv_all({a})"),
             "recv_n" => format!("__xlang_recv_n({a})"),
             "read_rbuf" => format!("__xlang_read_rbuf({a})"),
             "close_fd" => format!("close({a})"),
@@ -3685,6 +3705,18 @@ mod tests {
         assert!(
             c.contains("int32_t __xlang_time_now()"),
             "no time_now helper definition: {c}"
+        );
+    }
+
+    #[test]
+    fn emits_recv_all_drain_builtin() {
+        // `recv_all(fd)` drains a non-blocking socket into one growable buffer
+        // (loops recv to EAGAIN), so servers can read HTTP bodies > 64KB.
+        let c = gen_c("module main\nfn main(): i32 { let s: String = recv_all(3) return 0 }");
+        assert!(c.contains("__xlang_recv_all("), "no recv_all call: {c}");
+        assert!(
+            c.contains("char* __xlang_recv_all(int32_t fd)"),
+            "no recv_all helper definition: {c}"
         );
     }
 
