@@ -271,7 +271,7 @@ impl Checker {
         for param in params {
             self.declare(
                 &param.name,
-                false,
+                param.mutable,
                 type_from_node(&param.ty),
                 Span::unknown(0),
             );

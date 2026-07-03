@@ -341,12 +341,18 @@ impl Parser {
     }
 
     fn parse_param(&mut self) -> Result<Param, Diagnostic> {
+        let mut mutable = false;
+        if self.check("mut") {
+            self.bump();
+            mutable = true;
+        }
         let name = self.expect_ident()?.text;
         self.expect(":")?;
         let ty = self.parse_type_expr()?;
         Ok(Param {
             kind: "Param",
             name,
+            mutable,
             ty,
         })
     }
