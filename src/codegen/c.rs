@@ -1977,7 +1977,7 @@ impl CGen {
             "    int64_t total = 0;",
             "    ssize_t n;",
             "    while ((n = sendfile(1, 0, NULL, 1048576)) > 0) { total += n; }",
-            "    if (n < 0 && total == 0) return -1;",
+            "    if (total == 0) return -1;",
             "    return (int32_t)(total > 2147483647 ? 2147483647 : total);",
             "#else",
             "    return -1;",
