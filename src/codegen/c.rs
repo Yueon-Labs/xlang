@@ -2034,6 +2034,24 @@ impl CGen {
             "    listen(fd, 64);",
             "    return (int32_t)fd;",
             "}",
+            "// Like __xlang_tcp_listen but sets SO_REUSEPORT before bind, so a prefork",
+            "// pool of workers can all bind the same port and the kernel load-balances",
+            "// incoming connections across them (the nginx multi-worker model). Each",
+            "// worker accept()s on its own inherited fd inside its own epoll loop.",
+            "// SO_REUSEPORT must be set before bind(). Linux 3.8+.",
+            "int32_t __xlang_tcp_listen_reuseport(int32_t port) {",
+            "    int fd = socket(AF_INET, SOCK_STREAM, 0);",
+            "    int opt = 1;",
+            "    setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));",
+            "    setsockopt(fd, SOL_SOCKET, SO_REUSEPORT, &opt, sizeof(opt));",
+            "    struct sockaddr_in addr;",
+            "    addr.sin_family = AF_INET;",
+            "    addr.sin_addr.s_addr = INADDR_ANY;",
+            "    addr.sin_port = htons((uint16_t)port);",
+            "    bind(fd, (struct sockaddr*)&addr, sizeof(addr));",
+            "    listen(fd, 64);",
+            "    return (int32_t)fd;",
+            "}",
             "// Connect a TCP client to <host>:<port>. Resolves hostnames (via",
             "// getaddrinfo) as well as dotted-quads, so reverse-proxy upstreams can",
             "// be named. Returns the connected fd, or -1 on failure.",
@@ -2803,6 +2821,7 @@ impl CGen {
                 format!("__xlang_write_file({a}, {b})")
             }
             "tcp_listen" => format!("__xlang_tcp_listen({a})"),
+            "tcp_listen_reuseport" => format!("__xlang_tcp_listen_reuseport({a})"),
             "tcp_connect" => {
                 let Some(second) = args.get(1) else {
                     return Ok(None);
@@ -3717,6 +3736,23 @@ mod tests {
         assert!(
             c.contains("char* __xlang_recv_all(int32_t fd)"),
             "no recv_all helper definition: {c}"
+        );
+    }
+
+    #[test]
+    fn emits_tcp_listen_reuseport_builtin() {
+        // `tcp_listen_reuseport(port)` sets SO_REUSEPORT before bind so a prefork
+        // worker pool can share one port (nginx multi-worker model).
+        let c = gen_c(
+            "module main\nfn main(): i32 { let fd: i32 = tcp_listen_reuseport(8080) return fd }",
+        );
+        assert!(
+            c.contains("__xlang_tcp_listen_reuseport("),
+            "no tcp_listen_reuseport call: {c}"
+        );
+        assert!(
+            c.contains("int32_t __xlang_tcp_listen_reuseport(int32_t port)"),
+            "no tcp_listen_reuseport helper definition: {c}"
         );
     }
 
