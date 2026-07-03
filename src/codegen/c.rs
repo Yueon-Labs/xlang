@@ -2882,7 +2882,6 @@ impl CGen {
             "str_trim" => format!("__xlang_str_trim({a})"),
             "uid_to_name" => format!("__xlang_uid_to_name({a})"),
             "gid_to_name" => format!("__xlang_gid_to_name({a})"),
-            "read_utmp" => "__xlang_read_utmp()".to_string(),
             "time_format" => format!("__xlang_time_format({a})"),
             "time_format_utc" => format!("__xlang_time_format_utc({a})"),
             "str_split" => {
@@ -3378,6 +3377,7 @@ impl CGen {
             "now_s" => "__xlang_now_s()".to_string(),
             "sendfile_stdout" => "__xlang_sendfile_stdout()".to_string(),
             "time_now" => "__xlang_time_now()".to_string(),
+            "read_utmp" => "__xlang_read_utmp()".to_string(),
             "random_seed" => "srand((unsigned)time(NULL))".to_string(),
             "getcwd" => "__xlang_getcwd()".to_string(),
             "env_count" => "__xlang_env_count()".to_string(),
