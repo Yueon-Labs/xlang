@@ -48,6 +48,12 @@ pub struct CGen {
     /// function name (`__xlang_method_<Type>_<method>`). Used to dispatch
     /// `obj.method(args)` calls.
     methods: HashMap<(String, String), String>,
+    /// Methods declared with `mut self` — these take `self` by pointer so
+    /// mutations persist (the caller passes `&receiver`). (type, method).
+    mut_self: HashSet<(String, String)>,
+    /// True while generating the body of a `mut self` method (so `self` →
+    /// `(*self)` in expressions).
+    in_mut_self: bool,
 }
 
 impl CGen {
@@ -89,10 +95,14 @@ impl CGen {
             } = &item.node
             {
                 for method in methods {
-                    if let Item::FnDecl { name, .. } = &method.node {
+                    if let Item::FnDecl { name, params, .. } = &method.node {
                         let mangled = method_fn_name(type_name, name);
                         self.methods
                             .insert((type_name.clone(), name.clone()), mangled);
+                        // Track `mut self` methods (take self by pointer).
+                        if !params.is_empty() && params[0].mutable && params[0].name == "self" {
+                            self.mut_self.insert((type_name.clone(), name.clone()));
+                        }
                     }
                 }
             }
@@ -603,8 +613,12 @@ impl CGen {
             "void".to_string()
         } else {
             let mut parts = Vec::new();
-            for param in params {
-                parts.push(format!("{} {}", self.c_type(&param.ty)?, param.name));
+            for (i, param) in params.iter().enumerate() {
+                if i == 0 && param.mutable && param.name == "self" {
+                    parts.push(format!("{} *{}", self.c_type(&param.ty)?, param.name));
+                } else {
+                    parts.push(format!("{} {}", self.c_type(&param.ty)?, param.name));
+                }
             }
             parts.join(", ")
         };
@@ -631,8 +645,13 @@ impl CGen {
             "void".to_string()
         } else {
             let mut parts = Vec::new();
-            for param in params {
-                parts.push(format!("{} {}", self.c_type(&param.ty)?, param.name));
+            for (i, param) in params.iter().enumerate() {
+                // `mut self: Type` → `Type *self` (by pointer, so mutations persist).
+                if i == 0 && param.mutable && param.name == "self" {
+                    parts.push(format!("{} *{}", self.c_type(&param.ty)?, param.name));
+                } else {
+                    parts.push(format!("{} {}", self.c_type(&param.ty)?, param.name));
+                }
             }
             parts.join(", ")
         };
@@ -646,11 +665,14 @@ impl CGen {
             self.emit("__xlang_argc_g = argc;");
             self.emit("__xlang_argv_g = argv;");
         }
+        let prev_mut = self.in_mut_self;
+        self.in_mut_self = !params.is_empty() && params[0].mutable && params[0].name == "self";
         self.fn_return = Some(return_type.clone());
         for stmt in &body.statements {
             self.gen_stmt(stmt)?;
         }
         self.fn_return = None;
+        self.in_mut_self = prev_mut;
         self.pop_scope();
         self.indent -= 1;
         self.emit("}");
@@ -2775,6 +2797,12 @@ impl CGen {
             }
             Expr::BoolLiteral { value } => Ok(if *value { "true" } else { "false" }.to_string()),
             Expr::Identifier { name } => {
+                // In a `mut self` method, `self` is a pointer → `(*self)`.
+                // This makes `self.field` → `(*self).field`, `return self` →
+                // `(*self)`, and `self.m()` → receiver `(*self)` → `&(*self)` = self.
+                if self.in_mut_self && name == "self" {
+                    return Ok("(*self)".to_string());
+                }
                 // A unit-variant enum constant. For a unit-only enum → its index;
                 // for a unit variant of a payload enum → a tagged struct literal.
                 if let Some(idx) = self.enum_values.get(name) {
@@ -2854,9 +2882,15 @@ impl CGen {
                 // prepended: __xlang_method_<Type>_<method>(obj, args...).
                 if let Expr::FieldAccessExpr { object, field } = &callee.node
                     && let Some(ty_name) = self.types.type_name(object)
-                    && let Some(mangled) = self.methods.get(&(ty_name, field.clone())).cloned()
+                    && let Some(mangled) =
+                        self.methods.get(&(ty_name.clone(), field.clone())).cloned()
                 {
-                    let mut parts = vec![self.gen_expr(object)?];
+                    // For `mut self` methods, pass the receiver by address (&)
+                    // so the method's pointer param sees the caller's object.
+                    let is_mut = self.mut_self.contains(&(ty_name, field.clone()));
+                    let receiver = self.gen_expr(object)?;
+                    let prefix = if is_mut { "&" } else { "" };
+                    let mut parts = vec![format!("{prefix}{receiver}")];
                     for arg in args {
                         parts.push(self.gen_expr(arg)?);
                     }

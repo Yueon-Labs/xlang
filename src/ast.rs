@@ -80,6 +80,7 @@ pub struct FieldDecl {
 pub struct Param {
     pub kind: &'static str,
     pub name: String,
+    pub mutable: bool,
     #[serde(rename = "type")]
     pub ty: TypeNode,
 }
