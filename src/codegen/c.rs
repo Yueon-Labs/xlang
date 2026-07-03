@@ -2818,6 +2818,42 @@ impl CGen {
         Ok(Some(format!("__xlang_vec_pop_{elem_suffix}(&{v_c})")))
     }
 
+    /// Vec/Slice/Array method `len()` → `obj.len` (the runtime field).
+    /// Also handles `is_empty()` → `(obj.len == 0)`.
+    fn try_vec_len_call(
+        &self,
+        callee: &Spanned<Expr>,
+        args: &[Spanned<Expr>],
+    ) -> XResult<Option<String>> {
+        let Expr::FieldAccessExpr { object, field } = &callee.node else {
+            return Ok(None);
+        };
+        if !args.is_empty() {
+            return Ok(None);
+        }
+        let obj_ty = if let Expr::Identifier { name } = &object.node {
+            self.lookup_var(name).cloned()
+        } else {
+            self.types.type_node(object)
+        };
+        let Some(TypeNode::TypeExpr { name, args: targs }) = obj_ty else {
+            return Ok(None);
+        };
+        let is_collection = matches!(
+            (name.as_str(), targs.len()),
+            ("Vec", 1) | ("Slice", 1) | ("Array", 2)
+        );
+        if !is_collection {
+            return Ok(None);
+        }
+        let obj_c = self.gen_expr(object)?;
+        match field.as_str() {
+            "len" => Ok(Some(format!("({obj_c}.len)"))),
+            "is_empty" => Ok(Some(format!("({obj_c}.len == 0)"))),
+            _ => Ok(None),
+        }
+    }
+
     /// Zero-argument builtins (`fork`, `getpid`) — lower to the C calls. They
     /// need <unistd.h>, which the guarded networking preamble includes on Linux.
     fn try_zero_arg_call(
@@ -2977,6 +3013,10 @@ impl CGen {
                 }
                 // Vec pop: `v.pop()` → __xlang_vec_pop_T(&v).
                 if let Some(rendered) = self.try_vec_pop_call(callee, args)? {
+                    return Ok(rendered);
+                }
+                // Vec/Slice/Array len/is_empty: `v.len()` → v.len.
+                if let Some(rendered) = self.try_vec_len_call(callee, args)? {
                     return Ok(rendered);
                 }
                 // Method call: `obj.method(args)` → if obj's type has a method
