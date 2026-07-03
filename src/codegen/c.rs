@@ -1445,6 +1445,12 @@ impl CGen {
             "    snprintf(buf, 32, \"%*d\", width, n);",
             "    return buf;",
             "}",
+            "// Zero-pad n to `width` digits (%0*d): 5,3 → \"005\". Used by seq -w.",
+            "char* __xlang_pad_zero(int32_t n, int32_t width) {",
+            "    char* buf = (char*)malloc(32);",
+            "    snprintf(buf, 32, \"%0*d\", width, n);",
+            "    return buf;",
+            "}",
             "// SHA-512 hash (FIPS 180-4) → 128-char hex string.",
             "char* __xlang_sha512_hex(const char* data) {",
             "    static const uint64_t K[80]={",
@@ -2334,6 +2340,13 @@ impl CGen {
                 };
                 let b = self.gen_expr(second)?;
                 format!("__xlang_pad_int({a}, {b})")
+            }
+            "pad_zero" => {
+                let Some(second) = args.get(1) else {
+                    return Ok(None);
+                };
+                let b = self.gen_expr(second)?;
+                format!("__xlang_pad_zero({a}, {b})")
             }
             "max" => {
                 let Some(second) = args.get(1) else {
