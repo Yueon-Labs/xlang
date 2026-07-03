@@ -45,6 +45,10 @@ struct Checker {
     /// (params include `self` as the first element). Used to resolve
     /// `obj.method(args)` calls.
     methods: HashMap<(String, String), FnSig>,
+    /// Unit-variant enums: variant name → (enum name, index). Used to resolve
+    /// a bare variant identifier (`North`) to its enum type, and (in codegen)
+    /// to its integer value.
+    enum_variants: HashMap<String, (String, i32)>,
     structs: HashMap<String, Vec<(String, CheckedType)>>,
     return_types: Vec<CheckedType>,
     diags: Diagnostics,
@@ -136,6 +140,7 @@ pub fn check_program_typed(program: &Program) -> (Diagnostics, TypeMap) {
     checker.collect_functions(program);
     checker.collect_structs(program);
     checker.collect_methods(program);
+    checker.collect_enums(program);
     checker.check_program(program);
     (checker.diags, TypeMap(checker.types))
 }
@@ -212,6 +217,21 @@ impl Checker {
         }
     }
 
+    /// Register every `enum Name { ... }`'s variants: variant name →
+    /// (enum name, index). Variant names are global, so a later enum with a
+    /// duplicate variant name shadows the earlier (matches construction
+    /// resolution, which looks up the name).
+    fn collect_enums(&mut self, program: &Program) {
+        for item in &program.items {
+            if let Item::EnumDecl { name, variants } = &item.node {
+                for (idx, variant) in variants.iter().enumerate() {
+                    self.enum_variants
+                        .insert(variant.clone(), (name.clone(), idx as i32));
+                }
+            }
+        }
+    }
+
     fn check_program(&mut self, program: &Program) {
         for item in &program.items {
             match &item.node {
@@ -236,7 +256,7 @@ impl Checker {
                         }
                     }
                 }
-                Item::StructDecl { .. } | Item::TypeAliasDecl { .. } => {}
+                Item::StructDecl { .. } | Item::TypeAliasDecl { .. } | Item::EnumDecl { .. } => {}
             }
         }
     }
@@ -443,6 +463,9 @@ impl Checker {
             Expr::Identifier { name } => {
                 if is_builtin_variant(name) {
                     CheckedType::Unknown
+                } else if let Some((enum_name, _)) = self.enum_variants.get(name) {
+                    // A unit-variant enum constant (e.g. `North`) → its enum type.
+                    CheckedType::named(enum_name)
                 } else {
                     match self.lookup(name) {
                         Some(var) => var.ty,
@@ -1683,6 +1706,24 @@ fn main(): i32 {
             first_message(&diags).contains("cannot compare String with integer literal using <"),
             "should reject String < int: {diags:?}"
         );
+    }
+
+    #[test]
+    fn accepts_unit_variant_enum() {
+        // An enum variant resolves to the enum type, so `return A` typechecks
+        // for a function returning E, and `let e: E = B` is assignable.
+        let diags = check_source(
+            r#"
+module main
+enum E { A, B, C }
+fn pick(): E { return B }
+fn main(): i32 {
+    let e: E = pick()
+    return 0
+}
+"#,
+        );
+        assert!(diags.items.is_empty(), "enum should typecheck: {diags:?}");
     }
 
     #[test]

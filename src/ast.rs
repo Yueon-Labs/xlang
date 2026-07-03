@@ -49,6 +49,11 @@ pub enum Item {
         type_name: String,
         methods: Vec<Spanned<Item>>,
     },
+    /// `enum Name { A, B, C }` — a unit-variant enum (a set of named constants
+    /// of type `Name`). Variants are 0-indexed by declaration order. `Name`
+    /// lowers to int32_t; a variant `A` lowers to its index; `match` on a
+    /// `Name` compares the index.
+    EnumDecl { name: String, variants: Vec<String> },
 }
 
 #[derive(Clone, Debug, Serialize)]
