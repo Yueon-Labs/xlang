@@ -380,9 +380,8 @@ impl Parser {
             self.bump();
             return Ok(());
         }
-        if text.starts_with('>') {
-            // Peel one '>' off (e.g., ">>" → ">", ">>>" → ">>").
-            self.tokens[self.i].text = text[1..].to_string();
+        if let Some(rest) = text.strip_prefix('>') {
+            self.tokens[self.i].text = rest.to_string();
             return Ok(());
         }
         let tok = self.peek();
