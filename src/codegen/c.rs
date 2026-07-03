@@ -3280,6 +3280,8 @@ impl CGen {
         Ok(Some(match name.as_str() {
             "fork" => "fork()".to_string(),
             "getpid" => "getpid()".to_string(),
+            "getuid" => "((int32_t)getuid())".to_string(),
+            "getgid" => "((int32_t)getgid())".to_string(),
             "make_pipe" => "__xlang_make_pipe()".to_string(),
             "pipe_read_end" => "__xlang_pipe_read_end()".to_string(),
             "pipe_write_end" => "__xlang_pipe_write_end()".to_string(),
