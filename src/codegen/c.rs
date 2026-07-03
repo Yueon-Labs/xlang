@@ -474,6 +474,8 @@ impl CGen {
             TypeNode::TypeExpr { name, args } if args.is_empty() => match name.as_str() {
                 "i32" | "i64" | "f32" | "f64" | "bool" | "String" | "Str" => Ok(name.clone()),
                 other if self.struct_names.contains(other) => Ok(other.to_string()),
+                // An enum (unit → int32_t-like, payload → struct) suffixes by name.
+                other if self.enum_names.contains(other) => Ok(other.to_string()),
                 other => Err(XError::Codegen(format!(
                     "C backend does not support {other} as a generated type suffix yet"
                 ))),
