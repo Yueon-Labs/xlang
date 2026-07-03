@@ -1932,6 +1932,22 @@ impl CGen {
             "    out[j] = 0;",
             "    return out;",
             "}",
+            "// cat -A/-E/-T style 'show' of a string: show_tabs=1 → tab as \"^I\",",
+            "// show_ends=1 → '$' before each newline. Bulk O(n) in C, vs the per-char",
+            "// xlang loop that made cate/showall 3-6x slower than GNU cat -A/-E on Linux.",
+            "char* __xlang_cat_show(const char* s, int32_t show_tabs, int32_t show_ends) {",
+            "    int32_t n = (int32_t)strlen(s);",
+            "    char* out = (char*)malloc((size_t)n * 2 + 1);",
+            "    int32_t j = 0;",
+            "    for (int32_t i = 0; i < n; i++) {",
+            "        unsigned char c = (unsigned char)s[i];",
+            "        if (c == 9 && show_tabs) { out[j++] = '^'; out[j++] = 'I'; }",
+            "        else if (c == 10) { if (show_ends) out[j++] = '$'; out[j++] = '\\n'; }",
+            "        else { out[j++] = (char)c; }",
+            "    }",
+            "    out[j] = 0;",
+            "    return out;",
+            "}",
             "char* __xlang_read_line() {",
             "    char* buf = (char*)malloc(65536);",
             "    if (!fgets(buf, 65536, stdin)) { buf[0] = 0; return buf; }",
@@ -2798,6 +2814,14 @@ impl CGen {
                 };
                 let b = self.gen_expr(second)?;
                 format!("__xlang_str_delete({a}, {b})")
+            }
+            "cat_show" => {
+                let (Some(second), Some(third)) = (args.get(1), args.get(2)) else {
+                    return Ok(None);
+                };
+                let b = self.gen_expr(second)?;
+                let c = self.gen_expr(third)?;
+                format!("__xlang_cat_show({a}, {b}, {c})")
             }
             "str_char_at" => {
                 let Some(second) = args.get(1) else {
@@ -3901,6 +3925,22 @@ mod tests {
         assert!(
             c.contains("char* __xlang_str_delete(const char* s, const char* set)"),
             "no str_delete helper: {c}"
+        );
+    }
+
+    #[test]
+    fn emits_cat_show_builtin() {
+        // cat_show(s, tabs, ends) — bulk cat -A/-E/-T expansion (tab→^I, $ before
+        // newline), O(n) in C, vs the per-char loop that made cate/showall slow.
+        let c = gen_c(
+            "module main\nfn f(s: String): i32 { let a: String = cat_show(s, 1, 1) return 0 }",
+        );
+        assert!(c.contains("__xlang_cat_show("), "no cat_show call: {c}");
+        assert!(
+            c.contains(
+                "char* __xlang_cat_show(const char* s, int32_t show_tabs, int32_t show_ends)"
+            ),
+            "no cat_show helper: {c}"
         );
     }
 
