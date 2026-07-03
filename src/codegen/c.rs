@@ -134,6 +134,8 @@ impl CGen {
         self.emit("#ifdef __linux__");
         self.emit("#include <sys/sendfile.h>");
         self.emit("#include <unistd.h>");
+        self.emit("#include <pwd.h>");
+        self.emit("#include <grp.h>");
         self.emit("#endif");
         self.emit("");
         self.emit_runtime_preamble();
