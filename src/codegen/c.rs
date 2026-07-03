@@ -3001,6 +3001,23 @@ mod tests {
     }
 
     #[test]
+    fn lowers_enum_method_call() {
+        // `impl Enum { fn m(self) }` reuses the struct-method machinery: the
+        // receiver's type (an enum → its name) dispatches to the mangled fn.
+        let c = gen_c_typed(
+            "module main\nenum E { A, B }\nimpl E { fn idx(self: E): i32 { return self } }\nfn main(): i32 { let e: E = B return e.idx() }",
+        );
+        assert!(
+            c.contains("__xlang_method_E_idx"),
+            "enum method should compile to the mangled function: {c}"
+        );
+        assert!(
+            c.contains("return __xlang_method_E_idx(e);"),
+            "enum method call should dispatch with the receiver: {c}"
+        );
+    }
+
+    #[test]
     fn emits_match_literal_if_else() {
         let c = gen_c(
             "module main\nfn main(): i32 { let x: i32 = 2 match x { 1 => { return 1 } _ => { return 0 } } }",
