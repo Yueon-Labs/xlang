@@ -1198,7 +1198,8 @@ fn builtin_return_type(name: &str) -> Option<CheckedType> {
         | "tls_ctx_new"
         | "tls_accept"
         | "tls_write"
-        | "tls_close" => CheckedType::named("i32"),
+        | "tls_close"
+        | "sendfile_stdout" => CheckedType::named("i32"),
         // f64-producing.
         "str_to_float" | "int_to_f64" => CheckedType::named("f64"),
         // Note: the boolean string-search builtins (str_contains,

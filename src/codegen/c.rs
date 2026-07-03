@@ -131,6 +131,10 @@ impl CGen {
         self.emit("#include <stdlib.h>");
         self.emit("#include <time.h>");
         self.emit("#include <locale.h>");
+        self.emit("#ifdef __linux__");
+        self.emit("#include <sys/sendfile.h>");
+        self.emit("#include <unistd.h>");
+        self.emit("#endif");
         self.emit("");
         self.emit_runtime_preamble();
         self.emit_networking_preamble();
@@ -1963,6 +1967,22 @@ impl CGen {
             "    if (n > 0 && buf[n - 1] == '\\n') buf[n - 1] = 0;",
             "    return buf;",
             "}",
+            "// Zero-copy stdin→stdout via sendfile (Linux). Returns bytes sent, or -1",
+            "// if sendfile isn't available or failed (pipe stdin, non-Linux) — caller",
+            "// falls back to read_stdin+print_raw. For `cat` on file-redirected stdin,",
+            "// this matches GNU cat's zero-copy splice (the 6x Linux gap was the",
+            "// read+write copy). Always emitted (Windows returns -1 → fallback).",
+            "int32_t __xlang_sendfile_stdout() {",
+            "#ifdef __linux__",
+            "    int64_t total = 0;",
+            "    ssize_t n;",
+            "    while ((n = sendfile(1, 0, NULL, 1048576)) > 0) { total += n; }",
+            "    if (n < 0 && total == 0) return -1;",
+            "    return (int32_t)(total > 2147483647 ? 2147483647 : total);",
+            "#else",
+            "    return -1;",
+            "#endif",
+            "}",
             "static char* __sb_buf = 0;",
             "static size_t __sb_len = 0;",
             "static size_t __sb_cap = 0;",
@@ -3223,6 +3243,7 @@ impl CGen {
             "ignore_sigpipe" => "signal(SIGPIPE, SIG_IGN)".to_string(),
             "time_str" => "__xlang_time_str()".to_string(),
             "now_s" => "__xlang_now_s()".to_string(),
+            "sendfile_stdout" => "__xlang_sendfile_stdout()".to_string(),
             "time_now" => "__xlang_time_now()".to_string(),
             "random_seed" => "srand((unsigned)time(NULL))".to_string(),
             "getcwd" => "__xlang_getcwd()".to_string(),
