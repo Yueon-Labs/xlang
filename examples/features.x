@@ -45,6 +45,31 @@ impl Point {
     }
 }
 
+// mut self: the receiver is passed BY POINTER, so mutations persist to the
+// caller's object. Combined with push-on-field and Vec.pop, you get full
+// mutable data structures.
+struct Counter {
+    items: Vec<i32>
+}
+
+impl Counter {
+    fn add(mut self: Counter, v: i32): i32 {
+        self.items.push(v)
+        return 0
+    }
+    fn remove(mut self: Counter): i32 {
+        return self.items.pop()
+    }
+    fn top(self: Counter): i32 {
+        let n: i32 = vec_len(self.items)
+        if n == 0 { return -1 }
+        return self.items[n - 1]
+    }
+    fn count(self: Counter): i32 {
+        return vec_len(self.items)
+    }
+}
+
 // Recursive fibonacci (i32).
 fn fib(n: i32): i32 {
     if n < 2 { return n }
@@ -223,6 +248,24 @@ fn main(): i32 {
     print_raw("sum 1..=5 = ")
     print_raw(int_to_str(inc))
     print_raw("\n")
+
+    // -- mut self: mutable methods (push/pop persist through pointer) --
+    let ctr: Counter = Counter { items: vec_new() }
+    ctr.add(10)
+    ctr.add(20)
+    ctr.add(30)
+    print_raw("mut self top/count: ")
+    print_raw(int_to_str(ctr.top()))
+    print_raw("/")
+    print_raw(int_to_str(ctr.count()))
+    print_raw("\n")
+    let removed: i32 = ctr.remove()
+    print_raw("after pop: ")
+    print_raw(int_to_str(removed))
+    print_raw(" top=")
+    print_raw(int_to_str(ctr.top()))
+    print_raw("\n")
+    assert(ctr.count() == 2)
 
     return 0
 }
