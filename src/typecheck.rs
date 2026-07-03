@@ -1170,9 +1170,8 @@ fn builtin_return_type(name: &str) -> Option<CheckedType> {
         "str_len" | "str_char_at" | "str_find" | "str_find_from" | "str_to_int"
         | "str_to_int_oct" | "str_cmp" | "argc" | "vec_len" | "abs" | "max" | "min"
         | "rbuf_byte_at" | "fork" | "wait_pid_status" | "stat_field" | "recv_n" | "read_rbuf"
-        | "open_append" | "close_fd" | "seek" | "tcp_connect" | "sendfile_range" | "now_s" => {
-            CheckedType::named("i32")
-        }
+        | "open_append" | "close_fd" | "seek" | "tcp_connect" | "sendfile_range" | "now_s"
+        | "time_now" => CheckedType::named("i32"),
         // f64-producing.
         "str_to_float" | "int_to_f64" => CheckedType::named("f64"),
         // Note: the boolean string-search builtins (str_contains,
