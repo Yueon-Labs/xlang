@@ -1878,9 +1878,11 @@ impl CGen {
             "}",
             "// Find sub in s starting at byte offset `from`; absolute index or -1.",
             "int32_t __xlang_str_find_from(const char* s, const char* sub, int32_t from) {",
-            "    size_t sl = strlen(s);",
             "    if (from < 0) from = 0;",
-            "    if ((size_t)from > sl) return -1;",
+            "    // O(1) terminal check (no strlen — strlen-per-call made loops over",
+            "    // str_find_from O(n^2), regressing wc -l's count_lines to 6s/100k).",
+            "    // Callers keep `from` <= strlen, so s[from] is a valid read.",
+            "    if (s[from] == 0) return -1;",
             "    const char* p = strstr(s + from, sub);",
             "    return p ? (int32_t)(p - s) : -1;",
             "}",
@@ -3903,6 +3905,21 @@ mod tests {
         assert!(
             c.contains("int32_t __xlang_tcp_listen_reuseport(int32_t port)"),
             "no tcp_listen_reuseport helper definition: {c}"
+        );
+    }
+
+    #[test]
+    fn str_find_from_has_no_per_call_strlen() {
+        // str_find_from must NOT call strlen(s) — that's O(n) per call, making
+        // loops over it (wc -l's count_lines) O(n²). Regressed wc -l on Linux.
+        let c = gen_c("module main\nfn f(s: String): i32 { return str_find_from(s, \"x\", 0) }");
+        let helper = c
+            .find("int32_t __xlang_str_find_from")
+            .map(|i| &c[i..])
+            .unwrap_or("");
+        assert!(
+            !helper[..400].contains("strlen(s)"),
+            "str_find_from calls strlen(s) per call (O(n²) in loops): {helper}"
         );
     }
 
