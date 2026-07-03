@@ -1902,12 +1902,34 @@ impl CGen {
             "char* __xlang_str_translate(const char* s, const char* from, const char* to) {",
             "    int32_t n = (int32_t)strlen(s);",
             "    int32_t tn = (int32_t)strlen(to);",
-            "    char* out = (char*)malloc(n + 1);",
-            "    for (int32_t i = 0; i < n; i++) {",
-            "        char* p = strchr(from, s[i]);",
-            "        out[i] = (p && (p - from) < tn) ? to[p - from] : s[i];",
+            "    // Build a 256-entry translation table once (first-occurrence wins,",
+            "    // matching strchr), then apply per char — O(n), vs the old O(n*|from|)",
+            "    // strchr-per-char which made `tr a-z A-Z` ~8x slower than GNU tr.",
+            "    char table[256];",
+            "    unsigned char mapped[256];",
+            "    for (int i = 0; i < 256; i++) { table[i] = (char)i; mapped[i] = 0; }",
+            "    for (int32_t i = 0; from[i] && i < tn; i++) {",
+            "        unsigned char c = (unsigned char)from[i];",
+            "        if (!mapped[c]) { table[c] = to[i]; mapped[c] = 1; }",
             "    }",
+            "    char* out = (char*)malloc(n + 1);",
+            "    for (int32_t i = 0; i < n; i++) out[i] = table[(unsigned char)s[i]];",
             "    out[n] = 0;",
+            "    return out;",
+            "}",
+            "// Delete every char in `set` from `s` — O(n) bulk via a 256-byte presence",
+            "// table (built in C), vs a per-char str_char_at loop in xlang. For tr -d.",
+            "char* __xlang_str_delete(const char* s, const char* set) {",
+            "    int32_t n = (int32_t)strlen(s);",
+            "    unsigned char keep[256];",
+            "    for (int i = 0; i < 256; i++) keep[i] = 1;",
+            "    for (int i = 0; set[i]; i++) keep[(unsigned char)set[i]] = 0;",
+            "    char* out = (char*)malloc(n + 1);",
+            "    int32_t j = 0;",
+            "    for (int32_t i = 0; i < n; i++) {",
+            "        if (keep[(unsigned char)s[i]]) out[j++] = s[i];",
+            "    }",
+            "    out[j] = 0;",
             "    return out;",
             "}",
             "char* __xlang_read_line() {",
@@ -2769,6 +2791,13 @@ impl CGen {
                 let b = self.gen_expr(second)?;
                 let c = self.gen_expr(third)?;
                 format!("__xlang_str_translate({a}, {b}, {c})")
+            }
+            "str_delete" => {
+                let Some(second) = args.get(1) else {
+                    return Ok(None);
+                };
+                let b = self.gen_expr(second)?;
+                format!("__xlang_str_delete({a}, {b})")
             }
             "str_char_at" => {
                 let Some(second) = args.get(1) else {
@@ -3850,6 +3879,28 @@ mod tests {
         assert!(
             c.contains("int32_t __xlang_tcp_listen_reuseport(int32_t port)"),
             "no tcp_listen_reuseport helper definition: {c}"
+        );
+    }
+
+    #[test]
+    fn str_translate_is_table_based_and_emits_str_delete() {
+        // str_translate now builds a 256-entry table (O(n), vs old O(n*|from|)
+        // strchr-per-char), and str_delete is a new O(n) bulk builtin (for tr -d).
+        let c = gen_c(
+            "module main\nfn f(s: String): i32 { let a: String = str_translate(s, \"a\", \"b\") let d: String = str_delete(s, \"x\") return 0 }",
+        );
+        assert!(
+            !c.contains("strchr(from, s[i])"),
+            "str_translate still uses O(n*|from|) strchr: {c}"
+        );
+        assert!(
+            c.contains("char table[256]"),
+            "str_translate not table-based: {c}"
+        );
+        assert!(c.contains("__xlang_str_delete("), "no str_delete call: {c}");
+        assert!(
+            c.contains("char* __xlang_str_delete(const char* s, const char* set)"),
+            "no str_delete helper: {c}"
         );
     }
 
