@@ -10,6 +10,12 @@ enum Color {
     Blue
 }
 
+// A payload enum (sum type): Error carries a String, Ok carries nothing.
+enum Status {
+    Ok
+    Error(String)
+}
+
 // Methods on Color reuse the impl machinery (the receiver's type dispatches).
 impl Color {
     fn name(self: Color): String {
@@ -102,6 +108,13 @@ fn main(): i32 {
         Blue => { print_raw("color: blue\n") }
     }
     print_str("via method: " + c.name() + "\n")   // via method: green
+
+    // -- payload enum (sum type): a variant carrying data --
+    let s: Status = Error("disk full")
+    match s {
+        Ok => { print_raw("status: ok\n") }
+        Error(msg) => { print_raw("status: " + msg + "\n") }   // status: disk full
+    }
 
     // -- f64 arithmetic + float_to_str --
     let pi: f64 = 3.14159

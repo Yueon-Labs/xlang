@@ -49,11 +49,23 @@ pub enum Item {
         type_name: String,
         methods: Vec<Spanned<Item>>,
     },
-    /// `enum Name { A, B, C }` — a unit-variant enum (a set of named constants
-    /// of type `Name`). Variants are 0-indexed by declaration order. `Name`
-    /// lowers to int32_t; a variant `A` lowers to its index; `match` on a
-    /// `Name` compares the index.
-    EnumDecl { name: String, variants: Vec<String> },
+    /// `enum Name { A, B(T), C }` — a set of variants. Unit variants (`A`) have
+    /// no payload; payload variants (`B(T)`) carry one. An all-unit enum lowers
+    /// to int32_t (a variant → its index); an enum with any payload variant
+    /// lowers to a tagged struct `{ tag; union{...} u; }`.
+    EnumDecl {
+        name: String,
+        variants: Vec<EnumVariant>,
+    },
+}
+
+/// One variant of an enum. `payload` is `Some(type)` for `B(T)`, `None` for a
+/// unit variant `A`.
+#[derive(Clone, Debug, Serialize)]
+pub struct EnumVariant {
+    pub kind: &'static str,
+    pub name: String,
+    pub payload: Option<TypeNode>,
 }
 
 #[derive(Clone, Debug, Serialize)]

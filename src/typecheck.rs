@@ -48,7 +48,7 @@ struct Checker {
     /// Unit-variant enums: variant name → (enum name, index). Used to resolve
     /// a bare variant identifier (`North`) to its enum type, and (in codegen)
     /// to its integer value.
-    enum_variants: HashMap<String, (String, i32)>,
+    enum_variants: HashMap<String, (String, i32, Option<CheckedType>)>,
     structs: HashMap<String, Vec<(String, CheckedType)>>,
     return_types: Vec<CheckedType>,
     diags: Diagnostics,
@@ -225,8 +225,9 @@ impl Checker {
         for item in &program.items {
             if let Item::EnumDecl { name, variants } = &item.node {
                 for (idx, variant) in variants.iter().enumerate() {
+                    let payload = variant.payload.as_ref().map(type_from_node);
                     self.enum_variants
-                        .insert(variant.clone(), (name.clone(), idx as i32));
+                        .insert(variant.name.clone(), (name.clone(), idx as i32, payload));
                 }
             }
         }
@@ -409,9 +410,16 @@ impl Checker {
                 self.infer_expr(value);
                 for arm in arms {
                     self.push_scope();
-                    if let crate::ast::Pattern::VariantPattern { bindings, .. } = &arm.pattern {
+                    if let crate::ast::Pattern::VariantPattern { name, bindings } = &arm.pattern {
+                        // Declare payload bindings with the variant's payload
+                        // type (e.g. `Err(msg)` → msg: String) when known.
+                        let payload_ty = self
+                            .enum_variants
+                            .get(name)
+                            .and_then(|(_, _, p)| p.clone())
+                            .unwrap_or(CheckedType::Unknown);
                         for binding in bindings {
-                            self.declare(binding, false, CheckedType::Unknown, stmt.span);
+                            self.declare(binding, false, payload_ty.clone(), stmt.span);
                         }
                     }
                     self.check_statements(&arm.body.statements);
@@ -463,7 +471,7 @@ impl Checker {
             Expr::Identifier { name } => {
                 if is_builtin_variant(name) {
                     CheckedType::Unknown
-                } else if let Some((enum_name, _)) = self.enum_variants.get(name) {
+                } else if let Some((enum_name, _, None)) = self.enum_variants.get(name) {
                     // A unit-variant enum constant (e.g. `North`) → its enum type.
                     CheckedType::named(enum_name)
                 } else {
@@ -755,6 +763,33 @@ impl Checker {
                     );
                 }
                 return sig.return_type;
+            }
+
+            // Enum payload-variant construction: `Err(msg)` → the enum type,
+            // checking the payload against the variant's declared type.
+            if let Some((enum_name, _, Some(payload_ty))) = self.enum_variants.get(name).cloned() {
+                if args.len() == 1 {
+                    let arg_ty = self.infer_expr(&args[0]);
+                    self.expect_assignable(
+                        &payload_ty,
+                        &arg_ty,
+                        &format!("payload for variant {name:?}"),
+                        args[0].span,
+                    );
+                } else {
+                    self.emit(
+                        span,
+                        ErrorCode::TypeArgCount,
+                        format!(
+                            "variant {name:?} expects 1 payload argument, got {}",
+                            args.len()
+                        ),
+                    );
+                    for arg in args {
+                        self.infer_expr(arg);
+                    }
+                }
+                return CheckedType::named(&enum_name);
             }
 
             for arg in args {
@@ -1724,6 +1759,41 @@ fn main(): i32 {
 "#,
         );
         assert!(diags.items.is_empty(), "enum should typecheck: {diags:?}");
+    }
+
+    #[test]
+    fn accepts_and_rejects_payload_enum() {
+        // A payload variant `Err(String)` constructs with a value, and match
+        // binds it; a wrong-typed payload is rejected.
+        let ok = check_source(
+            r#"
+module main
+enum S { Ok, Err(String) }
+fn msg(s: S): String {
+    match s {
+        Ok => { return "" }
+        Err(m) => { return m }
+    }
+}
+fn main(): i32 { return 0 }
+"#,
+        );
+        assert!(ok.items.is_empty(), "payload enum should typecheck: {ok:?}");
+
+        let bad = check_source(
+            r#"
+module main
+enum S { Ok, Err(String) }
+fn main(): i32 {
+    let s: S = Err(5)
+    return 0
+}
+"#,
+        );
+        assert!(
+            first_message(&bad).contains("payload for variant"),
+            "wrong payload type should be rejected: {bad:?}"
+        );
     }
 
     #[test]
