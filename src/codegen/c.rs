@@ -426,7 +426,7 @@ impl CGen {
             let pop_name = format!("__xlang_vec_pop_{elem_suffix}");
             typedefs.entry(pop_name.clone()).or_insert_with(|| {
                 format!(
-                    "{elem_c} {pop_name}({alias} *v) {{\n    if (v->len == 0) return ({elem_c})0;\n    return v->data[--v->len];\n}}"
+                    "{elem_c} {pop_name}({alias} *v) {{\n    if (v->len == 0) return ({elem_c}){{0}};\n    return v->data[--v->len];\n}}"
                 )
             });
         }
