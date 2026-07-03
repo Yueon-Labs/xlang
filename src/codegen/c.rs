@@ -3216,6 +3216,23 @@ mod tests {
     }
 
     #[test]
+    fn lowers_enum_with_struct_payload_and_wildcard() {
+        // A struct payload (`Two(Pair)`) and a wildcard arm: the struct binds
+        // through the union member, and `_ =>` lowers to the final `else`.
+        let c = gen_c_typed(
+            "module main\nstruct Pair { a: i32\n b: i32 }\nenum E { Empty, Two(Pair) }\nfn f(e: E): i32 { match e { Empty => { return 0 } Two(p) => { return p.a + p.b } _ => { return -1 } } }\nfn main(): i32 { return 0 }",
+        );
+        assert!(
+            c.contains("= e.u.v1;"),
+            "Two(p) arm should bind the struct payload from .u.v1: {c}"
+        );
+        assert!(
+            c.contains("} else {"),
+            "wildcard arm should lower to the final else: {c}"
+        );
+    }
+
+    #[test]
     fn emits_match_literal_if_else() {
         let c = gen_c(
             "module main\nfn main(): i32 { let x: i32 = 2 match x { 1 => { return 1 } _ => { return 0 } } }",
