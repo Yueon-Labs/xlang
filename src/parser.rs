@@ -299,16 +299,24 @@ impl Parser {
         })
     }
 
-    /// `enum Name { A, B, C }` — a unit-variant enum. Variant names are
-    /// collected in declaration order (their index is their runtime value).
+    /// `enum Name { A, B(T), C }` — variants may carry a payload type in parens.
     fn parse_enum_decl(&mut self) -> Result<Item, Diagnostic> {
         self.expect("enum")?;
         let name = self.expect_ident()?.text;
         self.expect("{")?;
         let mut variants = Vec::new();
         while !self.check("}") {
-            variants.push(self.expect_ident()?.text);
-            // optional comma between variants
+            let vname = self.expect_ident()?.text;
+            let mut payload = None;
+            if self.match_text("(") {
+                payload = Some(self.parse_type_expr()?);
+                self.expect(")")?;
+            }
+            variants.push(EnumVariant {
+                kind: "EnumVariant",
+                name: vname,
+                payload,
+            });
             self.match_text(",");
         }
         self.expect("}")?;

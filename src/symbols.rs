@@ -172,12 +172,19 @@ pub fn build_index(items: &[Spanned<Item>], source: &str) -> SymbolIndex {
                 }
             }
             Item::TypeAliasDecl { .. } => {}
-            // Index a unit-variant enum as a struct-shaped symbol (name +
-            // variant list), so it shows up in completion / symbol output.
+            // Index an enum as a struct-shaped symbol (name + variant names),
+            // so it shows up in completion / symbol output.
             Item::EnumDecl { name, variants } => {
+                let fields: Vec<String> = variants
+                    .iter()
+                    .map(|v| match &v.payload {
+                        Some(ty) => format!("{}({})", v.name, type_to_str(ty)),
+                        None => v.name.clone(),
+                    })
+                    .collect();
                 structs.push(StructSymbol {
                     name: name.clone(),
-                    fields: variants.clone(),
+                    fields,
                     range,
                     doc,
                 });

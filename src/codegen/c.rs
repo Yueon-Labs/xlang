@@ -34,6 +34,11 @@ pub struct CGen {
     /// integer value of each variant (so `Red` → its index).
     enum_names: HashSet<String>,
     enum_values: HashMap<String, i32>,
+    /// Per-variant payload type (by index) for each enum; `None` for a unit
+    /// variant. An enum is a tagged struct iff any entry is `Some`.
+    enum_payloads: HashMap<String, Vec<Option<TypeNode>>>,
+    /// variant name → the enum it belongs to (for construction/dispatch).
+    variant_enum: HashMap<String, String>,
     /// Inferred type of each expression (from typecheck), keyed by node address.
     /// Lets us lower `+` as string concat vs numeric add by inspecting operand
     /// types. Empty for the test path (`CGen::new()`), where `+` is always
@@ -66,9 +71,13 @@ impl CGen {
             }
             if let Item::EnumDecl { name, variants } = &item.node {
                 self.enum_names.insert(name.clone());
+                let mut payloads = Vec::new();
                 for (idx, variant) in variants.iter().enumerate() {
-                    self.enum_values.insert(variant.clone(), idx as i32);
+                    self.enum_values.insert(variant.name.clone(), idx as i32);
+                    self.variant_enum.insert(variant.name.clone(), name.clone());
+                    payloads.push(variant.payload.clone());
                 }
+                self.enum_payloads.insert(name.clone(), payloads);
             }
         }
         // Register impl-block methods: (type, method) → mangled free-function
@@ -174,6 +183,21 @@ impl CGen {
                 Item::TypeAliasDecl { ty, .. } => {
                     self.collect_type_typedefs(ty, &mut typedefs)?;
                 }
+                Item::EnumDecl { name, variants } => {
+                    // A payload enum lowers to a tagged struct with a union of
+                    // the payload types (one member per payload variant, by
+                    // index). Unit-only enums lower to int32_t (no typedef).
+                    let has_payload = variants.iter().any(|v| v.payload.is_some());
+                    if has_payload {
+                        for v in variants {
+                            if let Some(ty) = &v.payload {
+                                self.collect_type_typedefs(ty, &mut typedefs)?;
+                            }
+                        }
+                        let def = self.enum_def(name, variants)?;
+                        typedefs.entry(name.clone()).or_insert(def);
+                    }
+                }
                 Item::FnDecl {
                     params,
                     return_type,
@@ -203,7 +227,6 @@ impl CGen {
                         }
                     }
                 }
-                Item::EnumDecl { .. } => {}
             }
         }
         // Emit wrapper typedefs in dependency order (fixpoint): a wrapper whose
@@ -403,8 +426,15 @@ impl CGen {
                 "bool" => Ok("bool".to_string()),
                 "String" | "Str" => Ok("const char *".to_string()),
                 other if self.struct_names.contains(other) => Ok(other.to_string()),
-                // A unit-variant enum lowers to its tag integer.
-                other if self.enum_names.contains(other) => Ok("int32_t".to_string()),
+                // A unit-variant enum lowers to its tag integer; a payload enum
+                // lowers to its tagged-struct typedef (emitted by enum_def).
+                other if self.enum_names.contains(other) => {
+                    if self.enum_has_payload(other) {
+                        Ok(other.to_string())
+                    } else {
+                        Ok("int32_t".to_string())
+                    }
+                }
                 other => Err(XError::Codegen(format!(
                     "C backend does not support type yet: {other}"
                 ))),
@@ -511,6 +541,14 @@ impl CGen {
         format!("__xlang_{prefix}{id}")
     }
 
+    /// Whether an enum has any payload variant (→ tagged-struct representation).
+    fn enum_has_payload(&self, name: &str) -> bool {
+        self.enum_payloads
+            .get(name)
+            .map(|ps| ps.iter().any(|p| p.is_some()))
+            .unwrap_or(false)
+    }
+
     /// Build a user struct's `typedef struct {...} Name;` as a string (for
     /// dependency-ordered emission alongside wrapper typedefs — a struct with a
     /// `Vec<T>` field must be emitted after the `Vec_T` typedef).
@@ -527,6 +565,20 @@ impl CGen {
             ));
         }
         out.push_str(&format!("}} {name};"));
+        Ok(out)
+    }
+
+    /// Build a payload enum's tagged-struct typedef: `{ tag; union{...} u; }`.
+    /// Union member `v<idx>` holds variant idx's payload (one per payload
+    /// variant); unit variants set only the tag.
+    fn enum_def(&self, name: &str, variants: &[EnumVariant]) -> XResult<String> {
+        let mut out = format!("typedef struct {name} {{\n    int32_t tag;\n    union {{\n");
+        for (idx, v) in variants.iter().enumerate() {
+            if let Some(ty) = &v.payload {
+                out.push_str(&format!("        {} v{idx};\n", self.c_type(ty)?));
+            }
+        }
+        out.push_str(&format!("    }} u;\n}} {name};"));
         Ok(out)
     }
 
@@ -996,6 +1048,95 @@ impl CGen {
         Ok(Some(cond))
     }
 
+    /// Match a payload enum: if-else on `scrut.tag`, binding each arm's
+    /// payload from `scrut.u.v<idx>` (e.g. `Err(msg) =>` → `msg = scrut.u.v1`).
+    fn gen_enum_struct_match(
+        &mut self,
+        value: &Spanned<Expr>,
+        arms: &[MatchArm],
+        ty_name: &str,
+    ) -> XResult<()> {
+        // The scrutinee is a struct; bind a temp if it isn't an lvalue.
+        let scrut_c = if let Expr::Identifier { name } = &value.node {
+            name.clone()
+        } else {
+            let c_ty = self.c_type(&TypeNode::TypeExpr {
+                name: ty_name.to_string(),
+                args: vec![],
+            })?;
+            let temp = self.next_temp("e");
+            let init = self.gen_expr(value)?;
+            self.emit(&format!("{c_ty} {temp} = {init};"));
+            temp
+        };
+        let payloads = self.enum_payloads.get(ty_name).cloned();
+        let mut first = true;
+        let mut wildcard_body: Option<&crate::ast::Block> = None;
+
+        for arm in arms {
+            match &arm.pattern {
+                crate::ast::Pattern::VariantPattern { name, bindings } => {
+                    let Some(idx) = self.enum_values.get(name).copied() else {
+                        continue;
+                    };
+                    if first {
+                        self.emit(&format!("if ({scrut_c}.tag == {idx}) {{"));
+                        first = false;
+                    } else {
+                        self.emit(&format!("}} else if ({scrut_c}.tag == {idx}) {{"));
+                    }
+                    self.indent += 1;
+                    self.push_scope();
+                    if bindings.len() == 1 {
+                        let mut payload_ty: Option<TypeNode> = None;
+                        if let Some(ps) = payloads.as_ref()
+                            && let Some(Some(ty)) = ps.get(idx as usize)
+                        {
+                            payload_ty = Some(ty.clone());
+                        }
+                        if let Some(payload_ty) = payload_ty {
+                            let c_ty = self.c_type(&payload_ty)?;
+                            self.emit(&format!("{c_ty} {} = {scrut_c}.u.v{idx};", bindings[0]));
+                            self.declare_var(&bindings[0], payload_ty);
+                        }
+                    }
+                    for inner in &arm.body.statements {
+                        self.gen_stmt(inner)?;
+                    }
+                    self.pop_scope();
+                    self.indent -= 1;
+                }
+                crate::ast::Pattern::WildcardPattern => {
+                    wildcard_body = Some(&arm.body);
+                }
+                _ => {}
+            }
+        }
+
+        if let Some(body) = wildcard_body {
+            if first {
+                self.push_scope();
+                for inner in &body.statements {
+                    self.gen_stmt(inner)?;
+                }
+                self.pop_scope();
+            } else {
+                self.emit("} else {");
+                self.indent += 1;
+                self.push_scope();
+                for inner in &body.statements {
+                    self.gen_stmt(inner)?;
+                }
+                self.pop_scope();
+                self.indent -= 1;
+                self.emit("}");
+            }
+        } else if !first {
+            self.emit("}");
+        }
+        Ok(())
+    }
+
     /// Lower `match scrut { Some/Ok(v) => .., None/Err(..) => .. }` to a C
     /// `if/else` on the discriminant. v1: `scrut` must be a variable of type
     /// `Option<T>` or `Result<T, E>`.
@@ -1075,12 +1216,16 @@ impl CGen {
                     .to_string(),
             ));
         };
-        // Literal match for i32 / String scrutinees, and for unit-variant enums
+        // Literal match for i32 / String scrutinees, and for unit-only enums
         // (a variant pattern resolves to its integer value → scrut == value).
         if matches!(ty_name.as_str(), "i32" | "String" | "Str")
-            || self.enum_names.contains(&ty_name)
+            || (self.enum_names.contains(&ty_name) && !self.enum_has_payload(&ty_name))
         {
             return self.gen_literal_match(value, arms, &ty_name);
+        }
+        // Payload enum → match on the tag, binding the variant's payload.
+        if self.enum_has_payload(&ty_name) {
+            return self.gen_enum_struct_match(value, arms, &ty_name);
         }
         let is_option = match (ty_name.as_str(), args.len()) {
             ("Option", 1) => true,
@@ -2615,9 +2760,15 @@ impl CGen {
             }
             Expr::BoolLiteral { value } => Ok(if *value { "true" } else { "false" }.to_string()),
             Expr::Identifier { name } => {
-                // A unit-variant enum constant → its integer value.
-                if let Some(v) = self.enum_values.get(name) {
-                    return Ok(v.to_string());
+                // A unit-variant enum constant. For a unit-only enum → its index;
+                // for a unit variant of a payload enum → a tagged struct literal.
+                if let Some(idx) = self.enum_values.get(name) {
+                    if let Some(en) = self.variant_enum.get(name)
+                        && self.enum_has_payload(en)
+                    {
+                        return Ok(format!("({en}){{ .tag = {idx} }}"));
+                    }
+                    return Ok(idx.to_string());
                 }
                 Ok(name.clone())
             }
@@ -2695,6 +2846,17 @@ impl CGen {
                         parts.push(self.gen_expr(arg)?);
                     }
                     return Ok(format!("{mangled}({})", parts.join(", ")));
+                }
+                // Enum payload-variant construction: `Err(msg)` →
+                // (E){ .tag = idx, .u.v<idx> = <payload> }.
+                if let Expr::Identifier { name } = &callee.node
+                    && let Some(idx) = self.enum_values.get(name).copied()
+                    && let Some(en) = self.variant_enum.get(name).cloned()
+                    && self.enum_has_payload(&en)
+                    && args.len() == 1
+                {
+                    let val = self.gen_expr(&args[0])?;
+                    return Ok(format!("({en}){{ .tag = {idx}, .u.v{idx} = {val} }}"));
                 }
                 let mut parts = Vec::new();
                 for arg in args {
@@ -3014,6 +3176,27 @@ mod tests {
         assert!(
             c.contains("return __xlang_method_E_idx(e);"),
             "enum method call should dispatch with the receiver: {c}"
+        );
+    }
+
+    #[test]
+    fn lowers_payload_enum_construction_and_match() {
+        // `enum S { Ok, Err(String) }` → tagged struct; `Err("x")` sets
+        // .tag + .u.v1; `Err(m) =>` reads m from .u.v1.
+        let c = gen_c_typed(
+            "module main\nenum S { Ok, Err(String) }\nfn f(s: S): String { match s { Ok => { return \"\" } Err(m) => { return m } } }\nfn main(): i32 { let s: S = Err(\"x\") print_str(f(s)) return 0 }",
+        );
+        assert!(
+            c.contains("typedef struct S") && c.contains("union"),
+            "payload enum should emit a tagged struct with a union: {c}"
+        );
+        assert!(
+            c.contains(".tag = 1, .u.v1 ="),
+            "Err(...) construction should set tag 1 and the v1 payload: {c}"
+        );
+        assert!(
+            c.contains(".tag == 1)") && c.contains("= s.u.v1;"),
+            "Err(m) arm should test .tag==1 and bind m from .u.v1: {c}"
         );
     }
 
