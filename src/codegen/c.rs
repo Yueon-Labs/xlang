@@ -495,6 +495,13 @@ impl CGen {
                     "{elem_c} {remove_name}({alias} *v, size_t idx) {{\n    if (v->len == 0) return ({elem_c}){{0}};\n    {elem_c} old = v->data[idx];\n    for (size_t i = idx; i < v->len - 1; i++) v->data[i] = v->data[i+1];\n    v->len--;\n    return old;\n}}"
                 )
             });
+            // str_split helper: only emitted when Vec<String> exists.
+            if elem_suffix == "String" {
+                let split_name = "__xlang_str_split";
+                typedefs.entry(split_name.to_string()).or_insert_with(|| {
+                    "Vec_String __xlang_str_split(const char* s, char delim) {\n    Vec_String v = {0};\n    v.cap = 4;\n    v.data = (const char**)malloc(v.cap * sizeof(const char*));\n    size_t start = 0, i = 0;\n    while (1) {\n        char c = s[i];\n        if (c == delim || c == 0) {\n            size_t len = i - start;\n            char* part = (char*)malloc(len + 1);\n            memcpy(part, s + start, len);\n            part[len] = 0;\n            if (v.len == v.cap) { v.cap *= 2; v.data = (const char**)realloc(v.data, v.cap * sizeof(const char*)); }\n            v.data[v.len++] = part;\n            start = i + 1;\n            if (c == 0) break;\n        }\n        i++;\n    }\n    return v;\n}".to_string()
+                });
+            }
         }
         Ok(())
     }
@@ -1774,30 +1781,6 @@ impl CGen {
             "    char* out = (char*)malloc(len + 1);",
             "    memcpy(out, s + a, len); out[len] = 0;",
             "    return out;",
-            "}",
-            "// Split s by a single delimiter char → a Vec_String. The returned Vec",
-            "// contains the substrings (empty substrings are included for consecutive",
-            "// delimiters, matching Python/GNU cut behavior).",
-            "Vec_String __xlang_str_split(const char* s, char delim) {",
-            "    Vec_String v = {0};",
-            "    v.cap = 4;",
-            "    v.data = (const char**)malloc(v.cap * sizeof(const char*));",
-            "    size_t start = 0, i = 0;",
-            "    while (1) {",
-            "        char c = s[i];",
-            "        if (c == delim || c == 0) {",
-            "            size_t len = i - start;",
-            "            char* part = (char*)malloc(len + 1);",
-            "            memcpy(part, s + start, len);",
-            "            part[len] = 0;",
-            "            if (v.len == v.cap) { v.cap *= 2; v.data = (const char**)realloc(v.data, v.cap * sizeof(const char*)); }",
-            "            v.data[v.len++] = part;",
-            "            start = i + 1;",
-            "            if (c == 0) break;",
-            "        }",
-            "        i++;",
-            "    }",
-            "    return v;",
             "}",
             "int32_t __xlang_str_contains(const char* s, const char* sub) {",
             "    return strstr(s, sub) != NULL ? 1 : 0;",
