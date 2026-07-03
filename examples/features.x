@@ -110,8 +110,8 @@ fn main(): i32 {
     print_str("via method: " + c.name() + "\n")   // via method: green
 
     // -- payload enum (sum type): a variant carrying data --
-    let s: Status = Error("disk full")
-    match s {
+    let st: Status = Error("disk full")
+    match st {
         Ok => { print_raw("status: ok\n") }
         Error(msg) => { print_raw("status: " + msg + "\n") }   // status: disk full
     }
