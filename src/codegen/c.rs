@@ -2698,15 +2698,15 @@ impl CGen {
         if field != "push" || args.len() != 1 {
             return Ok(None);
         }
-        // `push` mutates the Vec in place via its address, so the receiver must
-        // be a variable the caller owns. A field-access receiver
-        // (`self.items.push(x)`) is intentionally NOT supported: methods take
-        // `self` by value, so the mutation wouldn't persist (it would touch a
-        // copy's descriptor). Mutate a local Vec instead.
-        let Expr::Identifier { name: vname } = &object.node else {
-            return Ok(None);
+        // Resolve the Vec element type from a variable OR the type map (so
+        // `self.items.push(x)` works — with `mut self`, `self` is a pointer
+        // and `&(*self).items` is the real address → mutation persists).
+        let obj_ty = if let Expr::Identifier { name } = &object.node {
+            self.lookup_var(name).cloned()
+        } else {
+            self.types.type_node(object)
         };
-        let Some(TypeNode::TypeExpr { name, args: targs }) = self.lookup_var(vname) else {
+        let Some(TypeNode::TypeExpr { name, args: targs }) = obj_ty else {
             return Ok(None);
         };
         if name != "Vec" || targs.len() != 1 {
