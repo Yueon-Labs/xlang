@@ -2098,6 +2098,24 @@ impl CGen {
             "    __sb_buf[__sb_len++] = (char)c;",
             "    __sb_buf[__sb_len] = 0;",
             "}",
+            "// Append s[start..end) to the sb buffer directly (no per-call malloc, no",
+            "// strlen of the whole string — clamps end at the first NUL from start).",
+            "// Lets streaming tools (tac/cut/uniq/...) emit per-line substrings without",
+            "// the N mallocs that str_slice-into-sb_push would cost.",
+            "void __xlang_sb_push_slice(const char* s, int32_t start, int32_t end) {",
+            "    if (start < 0) start = 0;",
+            "    if (end < start) return;",
+            "    int32_t i = start;",
+            "    while (i < end && s[i] != 0) i++;",
+            "    size_t sl = (size_t)(i - start);",
+            "    if (__sb_len + sl + 1 > __sb_cap) {",
+            "        while (__sb_len + sl + 1 > __sb_cap) __sb_cap *= 2;",
+            "        __sb_buf = (char*)realloc(__sb_buf, __sb_cap);",
+            "    }",
+            "    memcpy(__sb_buf + __sb_len, s + start, sl);",
+            "    __sb_len += sl;",
+            "    __sb_buf[__sb_len] = 0;",
+            "}",
             "char* __xlang_time_str() {",
             "    setlocale(LC_TIME, \"\");",
             "    time_t t = time(NULL);",
@@ -2818,6 +2836,15 @@ impl CGen {
                 let b = self.gen_expr(&args[1])?;
                 let c = self.gen_expr(&args[2])?;
                 format!("__xlang_str_slice({a}, {b}, {c})")
+            }
+            // Append a substring directly to the sb buffer (no malloc, no strlen).
+            "sb_push_slice" => {
+                if args.len() < 3 {
+                    return Ok(None);
+                }
+                let b = self.gen_expr(&args[1])?;
+                let c = self.gen_expr(&args[2])?;
+                format!("__xlang_sb_push_slice({a}, {b}, {c})")
             }
             "str_reverse" => format!("__xlang_str_reverse({a})"),
             "str_lower" => format!("__xlang_str_lower({a})"),
@@ -3687,6 +3714,19 @@ mod tests {
         assert!(
             c.contains("fprintf(stderr, \"%d\\n\", 42)"),
             "no eprint_i32: {c}"
+        );
+    }
+
+    #[test]
+    fn emits_sb_push_slice_call() {
+        // sb_push_slice appends a substring to the sb buffer directly (no malloc,
+        // no strlen) — the streaming-output primitive for tac/cut/uniq/...
+        let c = gen_c_typed(
+            "module main\nfn main(): i32 { sb_new() sb_push_slice(\"hello\", 1, 4) print_raw(sb_str()) return 0 }",
+        );
+        assert!(
+            c.contains("__xlang_sb_push_slice(\"hello\", 1, 4)"),
+            "no sb_push_slice: {c}"
         );
     }
 
