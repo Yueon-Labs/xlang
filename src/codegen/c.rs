@@ -30,6 +30,10 @@ pub struct CGen {
     fn_return: Option<TypeNode>,
     /// User-defined struct names (so `c_type` recognises them as value types).
     struct_names: HashSet<String>,
+    /// Struct field declarations: struct name → Vec<(field_name, field_type)>.
+    /// Used to look up a field's declared type in struct-literal context (e.g.
+    /// so `Bag { items: vec_new() }` can lower vec_new with the Vec<T> type).
+    struct_fields: HashMap<String, Vec<(String, TypeNode)>>,
     /// Unit-variant enum names (so `c_type` lowers them to int32_t) and the
     /// integer value of each variant (so `Red` → its index).
     enum_names: HashSet<String>,
@@ -72,8 +76,15 @@ impl CGen {
 
     pub fn generate(mut self, program: &Program) -> XResult<String> {
         for item in &program.items {
-            if let Item::StructDecl { name, .. } = &item.node {
+            if let Item::StructDecl { name, fields } = &item.node {
                 self.struct_names.insert(name.clone());
+                self.struct_fields.insert(
+                    name.clone(),
+                    fields
+                        .iter()
+                        .map(|f| (f.name.clone(), f.ty.clone()))
+                        .collect(),
+                );
             }
             if let Item::EnumDecl { name, variants } = &item.node {
                 self.enum_names.insert(name.clone());
@@ -2957,9 +2968,28 @@ impl CGen {
                 Ok(format!("{}.{}", self.gen_expr(object)?, field))
             }
             Expr::StructLiteral { name, fields } => {
+                // Look up field types so type-directed values (like vec_new())
+                // can be lowered via try_constructor — the declared field type
+                // provides the Vec<T> / Option<T> context that gen_expr lacks.
+                let field_types = self.struct_fields.get(name).cloned();
                 let mut parts = Vec::new();
                 for f in fields {
-                    parts.push(format!(".{} = {}", f.name, self.gen_expr(&f.value)?));
+                    let val = if let Some(ref fts) = field_types {
+                        let field_ty = fts
+                            .iter()
+                            .find(|(n, _)| n == &f.name)
+                            .map(|(_, t)| t.clone());
+                        if let Some(ty) = field_ty
+                            && let Some(rendered) = self.try_constructor(&ty, &f.value)?
+                        {
+                            rendered
+                        } else {
+                            self.gen_expr(&f.value)?
+                        }
+                    } else {
+                        self.gen_expr(&f.value)?
+                    };
+                    parts.push(format!(".{} = {val}", f.name));
                 }
                 Ok(format!("({name}){{ {} }}", parts.join(", ")))
             }
