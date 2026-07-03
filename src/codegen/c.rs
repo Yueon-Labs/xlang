@@ -2742,6 +2742,7 @@ impl CGen {
             "str_len" => format!("(int32_t)strlen({a})"),
             "argv" => format!("__xlang_argv_g[{a}]"),
             "print_raw" => format!("printf(\"%s\", {a})"),
+            "eprint_raw" => format!("fprintf(stderr, \"%s\", {a})"),
             // assert(cond) → runtime check + exit on failure. The condition is
             // evaluated as a C truthy int. Returns 0 so the call can sit in any
             // expression position (typically a statement).
@@ -3412,6 +3413,14 @@ impl CGen {
             "print_f64" => format!("printf(\"%f\\n\", {arg_c})"),
             "print_str" => format!("printf(\"%s\\n\", {arg_c})"),
             "print_bool" => format!("printf(\"%s\\n\", ({arg_c}) ? \"true\" : \"false\")"),
+            // stderr mirrors — diagnostics, so they don't pollute stdout
+            // (lets coreutils match GNU's stdout/stderr split exactly).
+            "eprint_i32" => format!("fprintf(stderr, \"%d\\n\", {arg_c})"),
+            "eprint_f64" => format!("fprintf(stderr, \"%f\\n\", {arg_c})"),
+            "eprint_str" => format!("fprintf(stderr, \"%s\\n\", {arg_c})"),
+            "eprint_bool" => {
+                format!("fprintf(stderr, \"%s\\n\", ({arg_c}) ? \"true\" : \"false\")")
+            }
             _ => return Ok(None),
         };
         Ok(Some(rendered))
@@ -3658,6 +3667,27 @@ mod tests {
     fn emits_fork_call() {
         let c = gen_c("module main\nfn main(): i32 { let p: i32 = fork() return p }");
         assert!(c.contains("fork();"), "no fork: {c}");
+    }
+
+    #[test]
+    fn emits_eprint_stderr_calls() {
+        // eprint_* mirror print_* but target stderr, so diagnostics don't
+        // pollute stdout (coreutils can match GNU's stream split).
+        let c = gen_c_typed(
+            "module main\nfn main(): i32 { eprint_str(\"boom\") eprint_raw(\"raw\") eprint_i32(42) return 0 }",
+        );
+        assert!(
+            c.contains("fprintf(stderr, \"%s\\n\", \"boom\")"),
+            "no eprint_str: {c}"
+        );
+        assert!(
+            c.contains("fprintf(stderr, \"%s\", \"raw\")"),
+            "no eprint_raw: {c}"
+        );
+        assert!(
+            c.contains("fprintf(stderr, \"%d\\n\", 42)"),
+            "no eprint_i32: {c}"
+        );
     }
 
     #[test]
