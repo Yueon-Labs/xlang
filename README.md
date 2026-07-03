@@ -2,7 +2,7 @@
 
 A TypeScript-like systems language that compiles to C via `xlangc`. Built in Rust.
 
-**120 coreutils**, **13 HTTP servers**, **129 examples** — all written in xlang, compiled to C, verified against GNU on Linux CI.
+**125 coreutils**, **14 HTTP/HTTPS servers**, **130 examples** — all written in xlang, compiled to C, verified against GNU on Linux CI.
 
 ## Build
 
@@ -96,35 +96,51 @@ fn sum_tree(t: Tree): i32 {
 }
 ```
 
-## Builtins (~90)
+## Builtins (~110)
 
 | Category | Builtins |
 |----------|----------|
 | Console | `print_i32 print_str print_raw print_f64` |
-| String | `str_len str_concat str_slice str_find str_char_at str_lower str_upper str_replace str_repeat str_trim str_contains str_starts_with str_ends_with str_eq str_cmp int_to_str float_to_str str_to_int str_to_float chr` |
+| String | `str_len str_concat str_slice str_find str_find_from str_char_at str_lower str_upper str_replace str_repeat str_trim str_contains str_starts_with str_ends_with str_eq str_cmp str_translate str_delete str_keep str_translate_complement cat_show int_to_str float_to_str str_to_int str_to_float chr` |
 | String builder | `sb_new sb_push sb_push_char sb_str` |
 | Vec | `vec_new vec_len vec.push vec.pop vec.insert vec.remove_at` |
-| File I/O | `read_file write_file read_stdin read_line` |
-| Filesystem | `remove_file make_dir chmod chown_file chgrp_file file_exists is_dir dir_count dir_entry stat_field` |
-| Networking | `tcp_listen tcp_connect accept recv_str send_str sendfile_range close_fd epoll_create epoll_add epoll_wait set_nonblock set_nodelay` |
-| Process | `fork getpid argc argv exec_split kill sleep_sec wait_pid_status` |
-| Time | `time_str now_s fmt_ctime fmt_http_date` |
+| File I/O | `read_file write_file read_stdin read_line sendfile_stdout` |
+| Filesystem | `remove_file make_dir chmod chown_file chgrp_file make_fifo mknod_dev file_exists is_dir dir_count dir_entry stat_field statvfs_field` |
+| Networking | `tcp_listen tcp_listen_reuseport tcp_connect accept recv_str recv_all send_str sendfile_range close_fd epoll_create epoll_add epoll_del epoll_wait set_nonblock set_nodelay` |
+| TLS/HTTPS | `tls_ctx_new tls_accept tls_read tls_write tls_close` (OpenSSL, gated) |
+| Process | `fork getpid getuid getgid argc argv exec_split kill sleep_sec wait_pid_status` |
+| Identity | `uid_to_name gid_to_name` (getpwuid/getgrgid) |
+| Time | `time_str time_format time_format_at time_format_at_utc time_now now_s fmt_ctime fmt_http_date` |
 | Math | `abs max min int_to_f64 int_to_i64 pad_int pad_zero` |
 | Self-check | `assert panic unreachable` |
 
-## Coreutils (120) — Linux userland replacement
+## Coreutils (125) — Linux userland replacement
 
-All written in xlang, compiled to C, cross-checked against GNU on Linux CI (71-case
-xcheck + 42 per-tool functional suites + 6 benchmarks).
+All written in xlang, compiled to C, cross-checked against GNU on Linux CI. Key tools:
 
-## HTTP servers (13) — nginx replacement
+- **sort**: `-r -n -u -k F[,F]` (multi-key) + `-t DELIM`. **Faster than GNU sort** on Linux.
+- **tr**: `-d -s -c` (complement). Bulk O(n) C builtins.
+- **sed**: `s/d/p` commands, addresses, `-n`, `-i` (in-place edit), `&` in replacement.
+- **grep**: `-v -c -n -r -i` (recursive, invert, count, line numbers).
+- **date**: `+FORMAT -u -R -I -d @EPOCH -d 'YYYY-MM-DD' -d yesterday/tomorrow/'N days ago'`.
+- **ls**: `-l -a -h -R`. Real user/group names via getpwuid/getgrgid.
+- **stat**: `-c FORMAT` with `%n %s %F %f %h %u %U %g %G %y %a`.
+- **cut**: `-d -f -c`. Bulk delimiter scan via str_find_from.
+- **find**: `-name -iname -type -maxdepth`.
+- **df**: Real filesystem stats via statvfs. `-h` human-readable.
+- **du**: `-s -h -k`. Human-readable sizes.
+
+Performance: most tools 1–2× GNU on Linux; several faster (sort 0.43×, rev 0.27×, wc 0.38×).
+
+## HTTP/HTTPS servers (14) — nginx replacement
 
 | Server | Features |
 |--------|----------|
-| server_http | Full CRUD + ETag/304 + Last-Modified/304 + Range/206 + dir listing |
-| server_gzip | Accept-Encoding negotiation + Vary header |
+| server_http | Full CRUD + ETag/304 + Last-Modified/304 + Range/206 + dir listing + CORS + dir redirect + **config-driven** (`-c conf`) + **multi-worker** (`-w N`, SO_REUSEPORT) + per-connection buffering + max request size (413) + sendfile |
+| server_tls | **HTTPS** via OpenSSL FFI. Concurrent via `-w N` worker pool. |
 | server_proxy | Reverse proxy with upstream keepalive + load balancing |
 | server_vhost | Path-routing proxy (nginx location{} style) |
+| server_gzip | Accept-Encoding negotiation + Vary header |
 | server_prefork, server_epoll, server_keepalive | Infrastructure variants |
 
 Benchmarked against **nginx 1.28**: beats nginx at low/medium concurrency; ties at c=5000.
@@ -132,7 +148,7 @@ Load-balancing scales linearly: 65k → 173k req/s with 1→3 backends.
 
 ## Testing
 
-97 unit tests (lexer, parser, typecheck, codegen, source, error, driver, symbols).
+105 unit tests (lexer, parser, typecheck, codegen, source, error, driver, symbols).
 All three repos CI-green on every PR. 6 benchmarks verify zero-overhead codegen
 (xlang-generated code matches or beats hand-written C).
 
