@@ -2613,7 +2613,7 @@ impl CGen {
                     return Ok(None);
                 };
                 let d = self.gen_expr(fourth)?;
-                format!("mknod({a}, {b}, makedev({c}, {d}))")
+                format!("mknod({a}, {b}, ((({c}) << 8) | (({d}) & 0xff)))")
             }
             "flush_stdout" => "fflush(stdout)".to_string(),
             "chown_file" => {
