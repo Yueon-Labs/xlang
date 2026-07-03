@@ -2836,6 +2836,8 @@ impl CGen {
             "chr" => format!("__xlang_chr({a})"),
             "abs" => format!("__xlang_abs({a})"),
             "str_trim" => format!("__xlang_str_trim({a})"),
+            "uid_to_name" => format!("__xlang_uid_to_name({a})"),
+            "gid_to_name" => format!("__xlang_gid_to_name({a})"),
             "time_format" => format!("__xlang_time_format({a})"),
             "time_format_utc" => format!("__xlang_time_format_utc({a})"),
             "str_split" => {
@@ -3308,8 +3310,6 @@ impl CGen {
             "getpid" => "getpid()".to_string(),
             "getuid" => "((int32_t)getuid())".to_string(),
             "getgid" => "((int32_t)getgid())".to_string(),
-            "uid_to_name" => "__xlang_uid_to_name({a})".to_string(),
-            "gid_to_name" => "__xlang_gid_to_name({a})".to_string(),
             "make_pipe" => "__xlang_make_pipe()".to_string(),
             "pipe_read_end" => "__xlang_pipe_read_end()".to_string(),
             "pipe_write_end" => "__xlang_pipe_write_end()".to_string(),
