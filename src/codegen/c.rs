@@ -495,6 +495,13 @@ impl CGen {
                     "{elem_c} {remove_name}({alias} *v, size_t idx) {{\n    if (v->len == 0) return ({elem_c}){{0}};\n    {elem_c} old = v->data[idx];\n    for (size_t i = idx; i < v->len - 1; i++) v->data[i] = v->data[i+1];\n    v->len--;\n    return old;\n}}"
                 )
             });
+            // str_split helper: only emitted when Vec<String> exists.
+            if elem_suffix == "String" {
+                let split_name = "__xlang_str_split";
+                typedefs.entry(split_name.to_string()).or_insert_with(|| {
+                    "Vec_String __xlang_str_split(const char* s, char delim) {\n    Vec_String v = {0};\n    v.cap = 4;\n    v.data = (const char**)malloc(v.cap * sizeof(const char*));\n    size_t start = 0, i = 0;\n    while (1) {\n        char c = s[i];\n        if (c == delim || c == 0) {\n            size_t len = i - start;\n            char* part = (char*)malloc(len + 1);\n            memcpy(part, s + start, len);\n            part[len] = 0;\n            if (v.len == v.cap) { v.cap *= 2; v.data = (const char**)realloc(v.data, v.cap * sizeof(const char*)); }\n            v.data[v.len++] = part;\n            start = i + 1;\n            if (c == 0) break;\n        }\n        i++;\n    }\n    return v;\n}".to_string()
+                });
+            }
         }
         Ok(())
     }
@@ -2508,6 +2515,13 @@ impl CGen {
             "chr" => format!("__xlang_chr({a})"),
             "abs" => format!("__xlang_abs({a})"),
             "str_trim" => format!("__xlang_str_trim({a})"),
+            "str_split" => {
+                let Some(second) = args.get(1) else {
+                    return Ok(None);
+                };
+                let b = self.gen_expr(second)?;
+                format!("__xlang_str_split({a}, {b}[0])")
+            }
             "str_contains" => {
                 let Some(second) = args.get(1) else {
                     return Ok(None);
