@@ -2329,6 +2329,15 @@ impl CGen {
             "    if (n > 0 && out[n-1] == '\\n') out[n-1] = 0;",
             "    return out;",
             "}",
+            "// HTTP-date (RFC 7231): Wed, 03 Jul 2024 12:00:00 GMT",
+            "char* __xlang_fmt_http_date(int32_t t) {",
+            "    time_t tt = (time_t)t;",
+            "    struct tm tm;",
+            "    gmtime_r(&tt, &tm);",
+            "    char* buf = (char*)malloc(32);",
+            "    strftime(buf, 32, \"%a, %d %b %Y %H:%M:%S GMT\", &tm);",
+            "    return buf;",
+            "}",
             "char* __xlang_getcwd() {",
             "    char* buf = (char*)malloc(4096);",
             "    return getcwd(buf, 4096);",
@@ -2551,6 +2560,7 @@ impl CGen {
             "file_size" => format!("__xlang_file_size({a})"),
             "file_exists" => format!("__xlang_file_exists({a})"),
             "fmt_ctime" => format!("__xlang_fmt_ctime({a})"),
+            "fmt_http_date" => format!("__xlang_fmt_http_date({a})"),
             "stat_field" => {
                 let Some(second) = args.get(1) else {
                     return Ok(None);
