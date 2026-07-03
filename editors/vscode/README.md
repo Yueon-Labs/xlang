@@ -1,6 +1,6 @@
 # X Language — VSCode Extension
 
-Language support for [xlang](https://github.com/dsadsasdaddas/xlang) (`.x` files) in VSCode:
+Language support for [xlang](https://github.com/Yueon-Labs/xlang) (`.x` files) in VSCode:
 - **Live diagnostics** — type/parse errors underlined as you type
 - **Hover** — function/struct signatures on hover
 - **Go to definition** — jump to a function/struct's definition
