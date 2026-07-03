@@ -172,6 +172,16 @@ pub fn build_index(items: &[Spanned<Item>], source: &str) -> SymbolIndex {
                 }
             }
             Item::TypeAliasDecl { .. } => {}
+            // Index a unit-variant enum as a struct-shaped symbol (name +
+            // variant list), so it shows up in completion / symbol output.
+            Item::EnumDecl { name, variants } => {
+                structs.push(StructSymbol {
+                    name: name.clone(),
+                    fields: variants.clone(),
+                    range,
+                    doc,
+                });
+            }
         }
     }
     SymbolIndex { functions, structs }

@@ -30,6 +30,10 @@ pub struct CGen {
     fn_return: Option<TypeNode>,
     /// User-defined struct names (so `c_type` recognises them as value types).
     struct_names: HashSet<String>,
+    /// Unit-variant enum names (so `c_type` lowers them to int32_t) and the
+    /// integer value of each variant (so `Red` → its index).
+    enum_names: HashSet<String>,
+    enum_values: HashMap<String, i32>,
     /// Inferred type of each expression (from typecheck), keyed by node address.
     /// Lets us lower `+` as string concat vs numeric add by inspecting operand
     /// types. Empty for the test path (`CGen::new()`), where `+` is always
@@ -59,6 +63,12 @@ impl CGen {
         for item in &program.items {
             if let Item::StructDecl { name, .. } = &item.node {
                 self.struct_names.insert(name.clone());
+            }
+            if let Item::EnumDecl { name, variants } = &item.node {
+                self.enum_names.insert(name.clone());
+                for (idx, variant) in variants.iter().enumerate() {
+                    self.enum_values.insert(variant.clone(), idx as i32);
+                }
             }
         }
         // Register impl-block methods: (type, method) → mangled free-function
@@ -115,7 +125,7 @@ impl CGen {
                         }
                     }
                 }
-                Item::StructDecl { .. } | Item::TypeAliasDecl { .. } => {}
+                Item::StructDecl { .. } | Item::TypeAliasDecl { .. } | Item::EnumDecl { .. } => {}
             }
         }
         self.emit("");
@@ -134,7 +144,7 @@ impl CGen {
                         }
                     }
                 }
-                Item::StructDecl { .. } | Item::TypeAliasDecl { .. } => {}
+                Item::StructDecl { .. } | Item::TypeAliasDecl { .. } | Item::EnumDecl { .. } => {}
             }
         }
 
@@ -193,6 +203,7 @@ impl CGen {
                         }
                     }
                 }
+                Item::EnumDecl { .. } => {}
             }
         }
         // Emit wrapper typedefs in dependency order (fixpoint): a wrapper whose
@@ -392,6 +403,8 @@ impl CGen {
                 "bool" => Ok("bool".to_string()),
                 "String" | "Str" => Ok("const char *".to_string()),
                 other if self.struct_names.contains(other) => Ok(other.to_string()),
+                // A unit-variant enum lowers to its tag integer.
+                other if self.enum_names.contains(other) => Ok("int32_t".to_string()),
                 other => Err(XError::Codegen(format!(
                     "C backend does not support type yet: {other}"
                 ))),
@@ -970,6 +983,11 @@ impl CGen {
             }
             Pattern::WildcardPattern => return Ok(None),
             Pattern::VariantPattern { name, .. } => {
+                // A unit-variant enum pattern resolves to its integer value:
+                // `North =>` → `scrut == <value>`.
+                if let Some(v) = self.enum_values.get(name) {
+                    return Ok(Some(format!("{scrut_c} == {v}")));
+                }
                 return Err(XError::Codegen(format!(
                     "variant pattern {name:?} not supported in literal match on {ty_name}"
                 )));
@@ -1057,8 +1075,11 @@ impl CGen {
                     .to_string(),
             ));
         };
-        // Literal match for i32 / String scrutinees.
-        if matches!(ty_name.as_str(), "i32" | "String" | "Str") {
+        // Literal match for i32 / String scrutinees, and for unit-variant enums
+        // (a variant pattern resolves to its integer value → scrut == value).
+        if matches!(ty_name.as_str(), "i32" | "String" | "Str")
+            || self.enum_names.contains(&ty_name)
+        {
             return self.gen_literal_match(value, arms, &ty_name);
         }
         let is_option = match (ty_name.as_str(), args.len()) {
@@ -2593,7 +2614,13 @@ impl CGen {
                 Ok(serde_json::to_string(value)?.replace("\\u001b", "\\x1b"))
             }
             Expr::BoolLiteral { value } => Ok(if *value { "true" } else { "false" }.to_string()),
-            Expr::Identifier { name } => Ok(name.clone()),
+            Expr::Identifier { name } => {
+                // A unit-variant enum constant → its integer value.
+                if let Some(v) = self.enum_values.get(name) {
+                    return Ok(v.to_string());
+                }
+                Ok(name.clone())
+            }
             Expr::ArrayLiteral { .. } => Err(XError::Codegen(
                 "array literals are only supported in typed Array<T, N> let initializers"
                     .to_string(),
@@ -2956,6 +2983,21 @@ mod tests {
             !c2.contains("__xlang_str_repeat(a, b)"),
             "numeric * must not call str_repeat: {c2}"
         );
+    }
+
+    #[test]
+    fn lowers_unit_variant_enum() {
+        // An enum lowers to int32_t; a variant `B` → its index; `match` on a
+        // variant pattern compares the index.
+        let c = gen_c(
+            "module main\nenum E { A, B, C }\nfn f(x: E): i32 { match x { A => { return 0 } B => { return 1 } _ => { return 9 } } }\nfn main(): i32 { let e: E = B return f(e) }",
+        );
+        // variant B is index 1, both at construction and in the match arm.
+        assert!(
+            c.contains("int32_t e = 1;"),
+            "variant B should be value 1: {c}"
+        );
+        assert!(c.contains("x == 1"), "match arm B should compare to 1: {c}");
     }
 
     #[test]

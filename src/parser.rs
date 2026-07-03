@@ -236,6 +236,8 @@ impl Parser {
             self.parse_fn_decl()?
         } else if self.check("impl") {
             self.parse_impl_decl()?
+        } else if self.check("enum") {
+            self.parse_enum_decl()?
         } else {
             let tok = self.peek();
             return Err(Diagnostic::error(
@@ -295,6 +297,22 @@ impl Parser {
             return_type,
             body,
         })
+    }
+
+    /// `enum Name { A, B, C }` — a unit-variant enum. Variant names are
+    /// collected in declaration order (their index is their runtime value).
+    fn parse_enum_decl(&mut self) -> Result<Item, Diagnostic> {
+        self.expect("enum")?;
+        let name = self.expect_ident()?.text;
+        self.expect("{")?;
+        let mut variants = Vec::new();
+        while !self.check("}") {
+            variants.push(self.expect_ident()?.text);
+            // optional comma between variants
+            self.match_text(",");
+        }
+        self.expect("}")?;
+        Ok(Item::EnumDecl { name, variants })
     }
 
     /// `impl Type { fn method(self: Type, ...): T { ... } ... }`. Each method

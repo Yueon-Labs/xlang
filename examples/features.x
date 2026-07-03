@@ -3,6 +3,13 @@ module main
 // features.x — exercise xlang's modern language features in one program.
 // Run: xlangc run examples/features.x
 
+// A unit-variant enum: a set of named constants of type Color.
+enum Color {
+    Red
+    Green
+    Blue
+}
+
 struct Point {
     x: i32
     y: i32
@@ -74,6 +81,14 @@ fn main(): i32 {
         "hi" => { print_raw("greeting-hi\n") }
         "hello" => { print_raw("greeting-hello\n") }
         _ => { print_raw("unknown\n") }
+    }
+
+    // -- unit-variant enum --
+    let c: Color = Green
+    match c {
+        Red => { print_raw("color: red\n") }
+        Green => { print_raw("color: green\n") }
+        Blue => { print_raw("color: blue\n") }
     }
 
     // -- f64 arithmetic + float_to_str --

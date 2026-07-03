@@ -326,6 +326,7 @@ fn is_keyword(text: &str) -> bool {
             | "type"
             | "fn"
             | "impl"
+            | "enum"
             | "let"
             | "mut"
             | "if"
