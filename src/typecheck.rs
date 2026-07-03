@@ -534,6 +534,8 @@ impl Checker {
                     CheckedType::Named { name, args } if name == "Vec" && args.len() == 1 => {
                         args[0].clone()
                     }
+                    // String/Str indexing: s[i] → i32 (byte value), like str_char_at.
+                    t if t.is_string() => CheckedType::named("i32"),
                     CheckedType::Unknown => CheckedType::Unknown,
                     other => {
                         self.emit(
