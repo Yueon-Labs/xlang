@@ -597,10 +597,57 @@ impl Parser {
     fn parse_while_stmt(&mut self) -> Result<Spanned<Stmt>, Diagnostic> {
         let start = self.cur_start();
         self.expect("while")?;
+        // `while let Pat = expr { body }` desugars to:
+        //   while true { match expr { Pat => { body } _ => { break } } }
+        if self.match_text("let") {
+            return self.parse_while_let(start);
+        }
         let condition = self.parse_expr()?;
         let body = self.parse_block()?;
         Ok(Spanned::new(
             Stmt::WhileStmt { condition, body },
+            self.span_from(start),
+        ))
+    }
+
+    /// Build the `while true { match ... { Pat => body, _ => break } }`
+    /// desugaring of `while let Pat = expr { body }`.
+    fn parse_while_let(&mut self, start: u32) -> Result<Spanned<Stmt>, Diagnostic> {
+        let pattern = self.parse_pattern()?;
+        self.expect("=")?;
+        let value = self.parse_expr()?;
+        let body = self.parse_block()?;
+        let match_stmt = Spanned::new(
+            Stmt::MatchStmt {
+                value,
+                arms: vec![
+                    MatchArm {
+                        kind: "MatchArm",
+                        pattern,
+                        body,
+                    },
+                    MatchArm {
+                        kind: "MatchArm",
+                        pattern: Pattern::WildcardPattern,
+                        body: Block {
+                            kind: "Block",
+                            statements: vec![Spanned::new(Stmt::BreakStmt, self.span_from(start))],
+                        },
+                    },
+                ],
+            },
+            self.span_from(start),
+        );
+        let condition = Spanned::new(Expr::BoolLiteral { value: true }, self.span_from(start));
+        let loop_body = Block {
+            kind: "Block",
+            statements: vec![match_stmt],
+        };
+        Ok(Spanned::new(
+            Stmt::WhileStmt {
+                condition,
+                body: loop_body,
+            },
             self.span_from(start),
         ))
     }
