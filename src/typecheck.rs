@@ -1797,6 +1797,31 @@ fn main(): i32 {
     }
 
     #[test]
+    fn accepts_enum_with_struct_payload() {
+        // A struct payload (`Two(Pair)`) gives a multi-field variant for free:
+        // the payload is the struct type, and the match binding gets its type.
+        let diags = check_source(
+            r#"
+module main
+struct Pair { a: i32
+    b: i32 }
+enum E { Empty, Two(Pair) }
+fn sum(e: E): i32 {
+    match e {
+        Empty => { return 0 }
+        Two(p) => { return p.a + p.b }
+    }
+}
+fn main(): i32 { return 0 }
+"#,
+        );
+        assert!(
+            diags.items.is_empty(),
+            "struct-payload enum should typecheck: {diags:?}"
+        );
+    }
+
+    #[test]
     fn accepts_and_rejects_method_calls() {
         // Method call with correct arity typechecks; wrong arity is rejected.
         let ok = check_source(
