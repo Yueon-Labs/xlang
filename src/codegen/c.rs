@@ -1,6 +1,7 @@
 use crate::ast::*;
 use crate::error::{XError, XResult};
 use crate::source::Spanned;
+use std::cell::Cell;
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 /// Build the `i32` type node (used e.g. for numeric range-loop iterators).
@@ -58,6 +59,10 @@ pub struct CGen {
     /// True while generating the body of a `mut self` method (so `self` →
     /// `(*self)` in expressions).
     in_mut_self: bool,
+    /// Set when any `tls_*` builtin is called, so the (OpenSSL) TLS preamble
+    /// section + `#define __XLANG_TLS__` are emitted only for programs that
+    /// actually use TLS — keeps non-TLS servers free of an OpenSSL dependency.
+    uses_tls: Cell<bool>,
 }
 
 impl CGen {
@@ -176,6 +181,12 @@ impl CGen {
                 }
                 Item::StructDecl { .. } | Item::TypeAliasDecl { .. } | Item::EnumDecl { .. } => {}
             }
+        }
+
+        // If any tls_* builtin was called, activate the gated TLS preamble
+        // (#ifdef __XLANG_TLS__) by defining the macro at the very top.
+        if self.uses_tls.get() {
+            self.lines.insert(0, "#define __XLANG_TLS__ 1".to_string());
         }
 
         Ok(format!("{}\n", self.lines.join("\n").trim_end()))
@@ -2482,6 +2493,57 @@ impl CGen {
             "    strcpy(m, u.machine);",
             "    return m;",
             "}",
+            "// TLS (HTTPS) via OpenSSL. Gated on __XLANG_TLS__ (defined only when a",
+            "// tls_* builtin is used) so non-TLS programs don't pull in OpenSSL.",
+            "// 64-bit SSL_CTX*/SSL* are hidden behind i32 table indices.",
+            "#ifdef __XLANG_TLS__",
+            "#include <openssl/ssl.h>",
+            "#include <openssl/err.h>",
+            "static SSL_CTX* __xlang_g_ctx[16];",
+            "static SSL* __xlang_g_ssl[256];",
+            "// Load cert+key into a new SSL_CTX; return a table index (or -1).",
+            "int32_t __xlang_tls_ctx_new(const char* cert, const char* key) {",
+            "    OPENSSL_init_ssl(OPENSSL_INIT_LOAD_SSL_STRINGS, NULL);",
+            "    SSL_CTX* ctx = SSL_CTX_new(TLS_server_method());",
+            "    if (!ctx) return -1;",
+            "    if (SSL_CTX_use_certificate_file(ctx, cert, SSL_FILETYPE_PEM) <= 0 ||",
+            "        SSL_CTX_use_PrivateKey_file(ctx, key, SSL_FILETYPE_PEM) <= 0) {",
+            "        SSL_CTX_free(ctx); return -1;",
+            "    }",
+            "    for (int i = 0; i < 16; i++) if (!__xlang_g_ctx[i]) { __xlang_g_ctx[i] = ctx; return i; }",
+            "    SSL_CTX_free(ctx); return -1;",
+            "}",
+            "// TLS-accept on fd (blocking handshake); return an SSL table index (or -1).",
+            "int32_t __xlang_tls_accept(int32_t ci, int32_t fd) {",
+            "    SSL* ssl = SSL_new(__xlang_g_ctx[ci]);",
+            "    if (!ssl) return -1;",
+            "    SSL_set_fd(ssl, fd);",
+            "    if (SSL_accept(ssl) <= 0) { SSL_free(ssl); return -1; }",
+            "    for (int i = 0; i < 256; i++) if (!__xlang_g_ssl[i]) { __xlang_g_ssl[i] = ssl; return i; }",
+            "    SSL_free(ssl); return -1;",
+            "}",
+            "// Read up to 64KB from a TLS connection into an owned, NUL-terminated buffer.",
+            "char* __xlang_tls_read(int32_t si) {",
+            "    char* buf = (char*)malloc(65536);",
+            "    int n = SSL_read(__xlang_g_ssl[si], buf, 65535);",
+            "    if (n < 0) n = 0;",
+            "    buf[n] = 0;",
+            "    return buf;",
+            "}",
+            "// Write a string to a TLS connection.",
+            "int32_t __xlang_tls_write(int32_t si, const char* s) {",
+            "    return (int32_t)SSL_write(__xlang_g_ssl[si], s, strlen(s));",
+            "}",
+            "// Shut down + free a TLS connection and release its table slot.",
+            "int32_t __xlang_tls_close(int32_t si) {",
+            "    if (__xlang_g_ssl[si]) {",
+            "        SSL_shutdown(__xlang_g_ssl[si]);",
+            "        SSL_free(__xlang_g_ssl[si]);",
+            "        __xlang_g_ssl[si] = NULL;",
+            "    }",
+            "    return 0;",
+            "}",
+            "#endif",
             "#endif",
             "",
         ];
@@ -2607,6 +2669,41 @@ impl CGen {
                 };
                 let b = self.gen_expr(second)?;
                 format!("__xlang_time_format_at_utc({a}, {b})")
+            }
+            // TLS (OpenSSL) builtins. Each sets uses_tls so the gated TLS
+            // preamble (#ifdef __XLANG_TLS__) + #define are emitted. Returns
+            // are tracked via the typecheck builtin map.
+            "tls_ctx_new" => {
+                self.uses_tls.set(true);
+                let Some(second) = args.get(1) else {
+                    return Ok(None);
+                };
+                let b = self.gen_expr(second)?;
+                format!("__xlang_tls_ctx_new({a}, {b})")
+            }
+            "tls_accept" => {
+                self.uses_tls.set(true);
+                let Some(second) = args.get(1) else {
+                    return Ok(None);
+                };
+                let b = self.gen_expr(second)?;
+                format!("__xlang_tls_accept({a}, {b})")
+            }
+            "tls_write" => {
+                self.uses_tls.set(true);
+                let Some(second) = args.get(1) else {
+                    return Ok(None);
+                };
+                let b = self.gen_expr(second)?;
+                format!("__xlang_tls_write({a}, {b})")
+            }
+            "tls_read" => {
+                self.uses_tls.set(true);
+                format!("__xlang_tls_read({a})")
+            }
+            "tls_close" => {
+                self.uses_tls.set(true);
+                format!("__xlang_tls_close({a})")
             }
             "chr" => format!("__xlang_chr({a})"),
             "abs" => format!("__xlang_abs({a})"),
@@ -3753,6 +3850,35 @@ mod tests {
         assert!(
             c.contains("int32_t __xlang_tcp_listen_reuseport(int32_t port)"),
             "no tcp_listen_reuseport helper definition: {c}"
+        );
+    }
+
+    #[test]
+    fn tls_builtins_are_gated_on_usage() {
+        // Using a tls_* builtin emits #define __XLANG_TLS__ + the OpenSSL section.
+        let with_tls = gen_c(
+            "module main\nfn f(cert: String, key: String): i32 { return tls_ctx_new(cert, key) }\nfn main(): i32 { return 0 }",
+        );
+        assert!(
+            with_tls.contains("#define __XLANG_TLS__ 1"),
+            "tls user missing #define: {with_tls}"
+        );
+        assert!(
+            with_tls.contains("__xlang_tls_ctx_new("),
+            "no tls call: {with_tls}"
+        );
+        assert!(
+            with_tls.contains("int32_t __xlang_tls_ctx_new(const char* cert, const char* key)"),
+            "no tls helper: {with_tls}"
+        );
+        // A program NOT using tls_* must NOT #define the macro (the #ifdef
+        // directive is always emitted, but undefined → body excluded, no OpenSSL
+        // link needed). Non-TLS servers stay free of the dependency.
+        let no_tls =
+            gen_c("module main\nfn main(): i32 { let fd: i32 = tcp_listen(8080) return fd }");
+        assert!(
+            !no_tls.contains("#define __XLANG_TLS__"),
+            "non-TLS program defined the TLS macro: {no_tls}"
         );
     }
 

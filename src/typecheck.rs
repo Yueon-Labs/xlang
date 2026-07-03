@@ -1164,8 +1164,8 @@ fn builtin_return_type(name: &str) -> Option<CheckedType> {
         "str_concat" | "str_lower" | "str_upper" | "str_replace" | "str_replace_first"
         | "str_repeat" | "str_slice" | "str_trim" | "str_reverse" | "str_translate" | "chr"
         | "int_to_str" | "float_to_str" | "read_file" | "read_stdin" | "recv_str" | "recv_all"
-        | "rbuf_str" | "argv" | "sb_str" | "time_format" | "time_format_utc" | "time_format_at"
-        | "time_format_at_utc" => CheckedType::named("String"),
+        | "rbuf_str" | "tls_read" | "argv" | "sb_str" | "time_format" | "time_format_utc"
+        | "time_format_at" | "time_format_at_utc" => CheckedType::named("String"),
         // i32-producing.
         "str_len"
         | "str_char_at"
@@ -1192,7 +1192,11 @@ fn builtin_return_type(name: &str) -> Option<CheckedType> {
         | "tcp_listen_reuseport"
         | "sendfile_range"
         | "now_s"
-        | "time_now" => CheckedType::named("i32"),
+        | "time_now"
+        | "tls_ctx_new"
+        | "tls_accept"
+        | "tls_write"
+        | "tls_close" => CheckedType::named("i32"),
         // f64-producing.
         "str_to_float" | "int_to_f64" => CheckedType::named("f64"),
         // Note: the boolean string-search builtins (str_contains,
