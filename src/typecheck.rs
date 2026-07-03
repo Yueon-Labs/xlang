@@ -1207,6 +1207,7 @@ fn builtin_return_type(name: &str) -> Option<CheckedType> {
         | "fork"
         | "wait_pid_status"
         | "stat_field"
+        | "statvfs_field"
         | "recv_n"
         | "read_rbuf"
         | "open_append"

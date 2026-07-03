@@ -133,6 +133,7 @@ impl CGen {
         self.emit("#include <locale.h>");
         self.emit("#ifdef __linux__");
         self.emit("#include <sys/sendfile.h>");
+        self.emit("#include <sys/statvfs.h>");
         self.emit("#include <unistd.h>");
         self.emit("#include <pwd.h>");
         self.emit("#include <grp.h>");
@@ -2561,6 +2562,22 @@ impl CGen {
             "    }",
             "    return -1;",
             "}",
+            "// Filesystem statistics via statvfs(2). Linux-only (#ifdef).",
+            "// Fields: 0=f_bsize, 1=f_frsize, 2=f_blocks, 3=f_bfree, 4=f_bavail.",
+            "int32_t __xlang_statvfs_field(const char* path, int32_t field) {",
+            "#ifdef __linux__",
+            "    struct statvfs vfs;",
+            "    if (statvfs(path, &vfs) != 0) return -1;",
+            "    switch (field) {",
+            "        case 0: return (int32_t)vfs.f_bsize;",
+            "        case 1: return (int32_t)vfs.f_frsize;",
+            "        case 2: return (int32_t)vfs.f_blocks;",
+            "        case 3: return (int32_t)vfs.f_bfree;",
+            "        case 4: return (int32_t)vfs.f_bavail;",
+            "    }",
+            "#endif",
+            "    return -1;",
+            "}",
             "// ctime(t) without the trailing newline (for ls -l dates).",
             "char* __xlang_fmt_ctime(int32_t t) {",
             "    time_t tt = (time_t)t;",
@@ -2950,6 +2967,13 @@ impl CGen {
                 };
                 let b = self.gen_expr(second)?;
                 format!("__xlang_stat_field({a}, {b})")
+            }
+            "statvfs_field" => {
+                let Some(second) = args.get(1) else {
+                    return Ok(None);
+                };
+                let b = self.gen_expr(second)?;
+                format!("__xlang_statvfs_field({a}, {b})")
             }
             "chdir" => format!("chdir(({a}))"),
             "make_dir" => format!("mkdir({a}, 0755)"),
