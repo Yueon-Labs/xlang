@@ -1,8 +1,8 @@
 # xlang — AI-first systems language
 
-A TypeScript-like systems language that compiles to C. Built in Rust.
-Features structured diagnostics, bitwise operators, and a growing standard
-library — **40 coreutils, a shell, and an HTTP server**, all written in xlang.
+A TypeScript-like systems language that compiles to C via `xlangc`. Built in Rust.
+
+**120 coreutils**, **13 HTTP servers**, **129 examples** — all written in xlang, compiled to C, verified against GNU on Linux CI.
 
 ## Build
 
@@ -23,71 +23,135 @@ fn main(): i32 {
 ```
 
 ```sh
-./target/release/xlangc c hello.x && cc -o hello hello.c && ./hello
+./target/release/xlangc run hello.x
 ```
 
 ## Language features
 
-| Feature | Status |
-|---------|--------|
-| Scalar types (`i32 i64 f32 f64 bool String`) | ✅ |
-| Parametric types (`Option<T> Result<T,E> Array<T,N> Vec<T> Slice<T>`) | ✅ |
-| Structs (with literals + field access) | ✅ |
-| `match` on Option/Result → C if/else | ✅ |
-| Arithmetic, comparison, logical operators | ✅ |
-| Bitwise operators (`& \| ^ ~ << >>`) | ✅ |
-| Compound assignment (`+= -= *= /= %=`) | ✅ |
-| Functions, recursion, array indexing | ✅ |
-| `if/else`, `while`, `for-in` | ✅ |
-| Structured diagnostics (machine-readable JSON) | ✅ |
+| Feature | Example |
+|---------|---------|
+| Scalar types (`i32 i64 f64 bool String`) | `let x: i32 = 42` |
+| Parametric types | `Option<T> Result<T,E> Array<T,N> Vec<T> Slice<T>` |
+| Structs + methods (incl. `mut self`) | `impl Stack { fn push(mut self: Stack, v)` |
+| Enums (unit + payload + recursive) | `enum Tree { Leaf, Branch(BranchData) }` |
+| `match` (literals, variants, ranges, OR, negative) | `match n { -1 => ..., 2..=9 => ..., _ => ... }` |
+| String operators (`+ * < <= > >= == !=`) | `"x" + "lang"`, `"=" * 10`, `s1 < s2` |
+| String indexing | `s[i]` → byte value (i32) |
+| Char literals | `'A'`, `'\n'`, `'\\'` |
+| Based integer literals | `0xFF`, `0b1010`, `0o755` |
+| Range loops | `for i in 0..n`, `for i in 0..=5` |
+| `if let` / `while let` | `if let Some(v) = opt { ... }` |
+| Compound assignment | `+= -= *= /= %=` |
+| Bitwise operators | `& | ^ ~ << >>` |
+| `assert` / `panic` / `unreachable` | `assert(x == 5)` |
+| Structured diagnostics | `check --format json` (machine-readable) |
+| LSP + VSCode extension | hover, go-to-definition, completion |
 
-## Standard library (~38 builtins)
+### Vec API (complete)
+
+```x
+let v: Vec<i32> = vec_new()
+v.push(10)
+v.push(30)
+v.insert(1, 20)          // [10, 20, 30]
+let top: i32 = v.pop()   // 30
+let len: i32 = v.len()
+let x: i32 = v[0]        // 10
+v.remove_at(0)            // [20]
+```
+
+### Mutable data structures
+
+```x
+struct Stack { items: Vec<i32> }
+
+impl Stack {
+    fn push(mut self: Stack, v: i32): i32 { self.items.push(v); return 0 }
+    fn pop(mut self: Stack): i32 { return self.items.pop() }
+    fn top(self: Stack): i32 {
+        let n: i32 = self.items.len()
+        if n == 0 { return -1 }
+        return self.items[n - 1]
+    }
+}
+```
+
+### Recursive types
+
+```x
+struct BranchData { v: i32, kids: Vec<Tree> }
+enum Tree { Leaf, Branch(BranchData) }
+
+fn sum_tree(t: Tree): i32 {
+    match t {
+        Leaf => { return 0 }
+        Branch(d) => {
+            let mut s: i32 = d.v
+            let n: i32 = d.kids.len()
+            let mut i: i32 = 0
+            while i < n { s += sum_tree(d.kids[i]); i += 1 }
+            return s
+        }
+    }
+}
+```
+
+## Builtins (~90)
 
 | Category | Builtins |
 |----------|----------|
-| Console I/O | `print_i32` `print_f64` `print_str` `print_bool` `print_raw` |
-| String | `str_len` `str_concat` `str_eq` `str_cmp` `str_find` `str_slice` `str_char_at` `str_reverse` `str_translate` `str_to_int` `str_to_int_oct` `int_to_str` |
-| File I/O | `read_file` `write_file` `read_stdin` `read_line` |
-| Filesystem | `remove_file` `rename_file` `make_dir` `chmod` `symlink` `file_size` `is_dir` |
-| Directory | `dir_count` `dir_entry` |
-| Networking | `tcp_listen` `accept` `recv_str` `send_str` `close_fd` |
-| Process | `fork` `getpid` `argc` `argv` `system` `kill` `sleep_sec` |
-| Time | `time_str` |
+| Console | `print_i32 print_str print_raw print_f64` |
+| String | `str_len str_concat str_slice str_find str_char_at str_lower str_upper str_replace str_repeat str_trim str_contains str_starts_with str_ends_with str_eq str_cmp int_to_str float_to_str str_to_int str_to_float chr` |
+| String builder | `sb_new sb_push sb_push_char sb_str` |
+| Vec | `vec_new vec_len vec.push vec.pop vec.insert vec.remove_at` |
+| File I/O | `read_file write_file read_stdin read_line` |
+| Filesystem | `remove_file make_dir chmod chown_file chgrp_file file_exists is_dir dir_count dir_entry stat_field` |
+| Networking | `tcp_listen tcp_connect accept recv_str send_str sendfile_range close_fd epoll_create epoll_add epoll_wait set_nonblock set_nodelay` |
+| Process | `fork getpid argc argv exec_split kill sleep_sec wait_pid_status` |
+| Time | `time_str now_s fmt_ctime fmt_http_date` |
+| Math | `abs max min int_to_f64 int_to_i64 pad_int pad_zero` |
+| Self-check | `assert panic unreachable` |
 
-## Coreutils (40) — Linux userland replication
+## Coreutils (120) — Linux userland replacement
 
-All written in xlang, compiled to C, verified against GNU on a Linux server.
+All written in xlang, compiled to C, cross-checked against GNU on Linux CI (71-case
+xcheck + 42 per-tool functional suites + 6 benchmarks).
 
-```
-cat  echo  wc  grep  head  tail  sort  uniq  rev  tac  tr  cut  expand
-expr  tee  yes  seq  nl  factor  paste  cp  mv  rm  mkdir  chmod  ln
-touch  ls  find  du  date  sleep  hostname  ps  uname  free  uptime
-kill  base64  od
-```
+## HTTP servers (13) — nginx replacement
 
-Plus **`xsh`** — a minimal shell (reads commands → executes via `system()` → loops).
+| Server | Features |
+|--------|----------|
+| server_http | Full CRUD + ETag/304 + Last-Modified/304 + Range/206 + dir listing |
+| server_gzip | Accept-Encoding negotiation + Vary header |
+| server_proxy | Reverse proxy with upstream keepalive + load balancing |
+| server_vhost | Path-routing proxy (nginx location{} style) |
+| server_prefork, server_epoll, server_keepalive | Infrastructure variants |
 
-## HTTP server (nginx replication)
+Benchmarked against **nginx 1.28**: beats nginx at low/medium concurrency; ties at c=5000.
+Load-balancing scales linearly: 65k → 173k req/s with 1→3 backends.
 
-xlang writes HTTP servers (keepalive, prefork, file serving, routing).
-Benchmarked against **nginx 1.28 (from source)** on a 64-core server:
+## Testing
 
-| Workload | nginx | xlang |
-|----------|-------|-------|
-| Fixed response, keepalive 16-conc (prefork) | 77k req/s | **129k req/s** |
-| 64KB file serving, keepalive 16-conc | 25.6k req/s | 22.7k req/s |
-| `cat\|grep\|sort\|uniq\|head` pipeline (500 lines) | 3ms | 5ms |
+97 unit tests (lexer, parser, typecheck, codegen, source, error, driver, symbols).
+All three repos CI-green on every PR. 6 benchmarks verify zero-overhead codegen
+(xlang-generated code matches or beats hand-written C).
+
+## Performance
+
+xlang compiles to C → `gcc -O2`. Generated code matches hand-written C:
+
+| Benchmark | xlang | Hand-written C |
+|-----------|-------|----------------|
+| Sieve (10M primes) | 0.06s | 0.06s |
+| Popcount (2M) | 0.17s | 0.21s |
+| String sort (4k) | 0.06s | 0.06s |
+| Method calls (2M) | 0.06s | 0.06s |
+| Enum VM (2M ops) | 0.07s | 0.06s |
 
 ## Methodology
 
 Built iteratively: **replicate → hit a limitation → modify xlang → implement → verify**.
-Each coreutil that needed a new capability drove xlang's growth (argv, read_stdin,
-str_char_at, str_cmp, bitwise operators, read_file /proc fix, Vec index-assign fix, etc.).
-
-## Testing
-
-52 unit tests covering every compiler component (lexer, parser, typecheck, codegen,
-source, error, driver). CI green on all 71+ commits.
+Each coreutil/server that needed a new capability drove xlang's growth.
 
 ## License
 
