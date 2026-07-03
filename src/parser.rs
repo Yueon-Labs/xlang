@@ -365,9 +365,31 @@ impl Parser {
             while self.match_text(",") {
                 args.push(self.parse_type_arg()?);
             }
-            self.expect(">")?;
+            self.close_generic()?;
         }
         Ok(TypeNode::TypeExpr { name, args })
+    }
+
+    /// Close a generic's `>`. Handles `>>`/`>>>` (tokenized as right-shift by
+    /// the lexer) by peeling one `>` off the current token, leaving the rest
+    /// for the enclosing generic. This enables nested generics like
+    /// `Vec<Vec<T>>`.
+    fn close_generic(&mut self) -> Result<(), Diagnostic> {
+        let text = self.peek().text.clone();
+        if text == ">" {
+            self.bump();
+            return Ok(());
+        }
+        if let Some(rest) = text.strip_prefix('>') {
+            self.tokens[self.i].text = rest.to_string();
+            return Ok(());
+        }
+        let tok = self.peek();
+        Err(Diagnostic::error(
+            ErrorCode::ParseExpectedToken,
+            self.tok_span(tok),
+            format!("expected \">\" to close generic args, got {:?}", tok.text),
+        ))
     }
 
     fn parse_type_arg(&mut self) -> Result<TypeNode, Diagnostic> {
