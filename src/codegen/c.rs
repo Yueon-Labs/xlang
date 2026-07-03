@@ -2598,6 +2598,24 @@ impl CGen {
             }
             "chdir" => format!("chdir(({a}))"),
             "make_dir" => format!("mkdir({a}, 0755)"),
+            "make_fifo" => format!("mkfifo({a}, 0644)"),
+            "chroot_call" => format!("chroot({a})"),
+            "mknod_dev" => {
+                let Some(second) = args.get(1) else {
+                    return Ok(None);
+                };
+                let b = self.gen_expr(second)?;
+                let Some(third) = args.get(2) else {
+                    return Ok(None);
+                };
+                let c = self.gen_expr(third)?;
+                let Some(fourth) = args.get(3) else {
+                    return Ok(None);
+                };
+                let d = self.gen_expr(fourth)?;
+                format!("mknod({a}, {b}, makedev({c}, {d}))")
+            }
+            "flush_stdout" => "fflush(stdout)".to_string(),
             "chown_file" => {
                 let Some(second) = args.get(1) else {
                     return Ok(None);
