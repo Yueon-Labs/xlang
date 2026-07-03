@@ -134,6 +134,8 @@ impl CGen {
         self.emit("#ifdef __linux__");
         self.emit("#include <sys/sendfile.h>");
         self.emit("#include <unistd.h>");
+        self.emit("#include <pwd.h>");
+        self.emit("#include <grp.h>");
         self.emit("#endif");
         self.emit("");
         self.emit_runtime_preamble();
@@ -2003,6 +2005,30 @@ impl CGen {
             "    if (n > 0 && buf[n - 1] == '\\n') buf[n - 1] = 0;",
             "    return buf;",
             "}",
+            "// Resolve a uid to a username via getpwuid (Linux). Returns \"\" on failure.",
+            "char* __xlang_uid_to_name(int32_t uid) {",
+            "#ifdef __linux__",
+            "    struct passwd* pw = getpwuid((uid_t)uid);",
+            "    if (!pw) { char* e = (char*)malloc(1); e[0] = 0; return e; }",
+            "    char* n = (char*)malloc(strlen(pw->pw_name) + 1);",
+            "    strcpy(n, pw->pw_name);",
+            "    return n;",
+            "#else",
+            "    char* e = (char*)malloc(1); e[0] = 0; return e;",
+            "#endif",
+            "}",
+            "// Resolve a gid to a group name via getgrgid (Linux). Returns \"\" on failure.",
+            "char* __xlang_gid_to_name(int32_t gid) {",
+            "#ifdef __linux__",
+            "    struct group* gr = getgrgid((gid_t)gid);",
+            "    if (!gr) { char* e = (char*)malloc(1); e[0] = 0; return e; }",
+            "    char* n = (char*)malloc(strlen(gr->gr_name) + 1);",
+            "    strcpy(n, gr->gr_name);",
+            "    return n;",
+            "#else",
+            "    char* e = (char*)malloc(1); e[0] = 0; return e;",
+            "#endif",
+            "}",
             "// Zero-copy stdin→stdout via sendfile (Linux). Returns bytes sent, or -1",
             "// if sendfile isn't available or failed (pipe stdin, non-Linux) — caller",
             "// falls back to read_stdin+print_raw. For `cat` on file-redirected stdin,",
@@ -3282,6 +3308,8 @@ impl CGen {
             "getpid" => "getpid()".to_string(),
             "getuid" => "((int32_t)getuid())".to_string(),
             "getgid" => "((int32_t)getgid())".to_string(),
+            "uid_to_name" => "__xlang_uid_to_name({a})".to_string(),
+            "gid_to_name" => "__xlang_gid_to_name({a})".to_string(),
             "make_pipe" => "__xlang_make_pipe()".to_string(),
             "pipe_read_end" => "__xlang_pipe_read_end()".to_string(),
             "pipe_write_end" => "__xlang_pipe_write_end()".to_string(),
