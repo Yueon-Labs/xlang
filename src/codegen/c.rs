@@ -1775,6 +1775,30 @@ impl CGen {
             "    memcpy(out, s + a, len); out[len] = 0;",
             "    return out;",
             "}",
+            "// Split s by a single delimiter char → a Vec_String. The returned Vec",
+            "// contains the substrings (empty substrings are included for consecutive",
+            "// delimiters, matching Python/GNU cut behavior).",
+            "Vec_String __xlang_str_split(const char* s, char delim) {",
+            "    Vec_String v = {0};",
+            "    v.cap = 4;",
+            "    v.data = (const char**)malloc(v.cap * sizeof(const char*));",
+            "    size_t start = 0, i = 0;",
+            "    while (1) {",
+            "        char c = s[i];",
+            "        if (c == delim || c == 0) {",
+            "            size_t len = i - start;",
+            "            char* part = (char*)malloc(len + 1);",
+            "            memcpy(part, s + start, len);",
+            "            part[len] = 0;",
+            "            if (v.len == v.cap) { v.cap *= 2; v.data = (const char**)realloc(v.data, v.cap * sizeof(const char*)); }",
+            "            v.data[v.len++] = part;",
+            "            start = i + 1;",
+            "            if (c == 0) break;",
+            "        }",
+            "        i++;",
+            "    }",
+            "    return v;",
+            "}",
             "int32_t __xlang_str_contains(const char* s, const char* sub) {",
             "    return strstr(s, sub) != NULL ? 1 : 0;",
             "}",
@@ -2508,6 +2532,13 @@ impl CGen {
             "chr" => format!("__xlang_chr({a})"),
             "abs" => format!("__xlang_abs({a})"),
             "str_trim" => format!("__xlang_str_trim({a})"),
+            "str_split" => {
+                let Some(second) = args.get(1) else {
+                    return Ok(None);
+                };
+                let b = self.gen_expr(second)?;
+                format!("__xlang_str_split({a}, {b}[0])")
+            }
             "str_contains" => {
                 let Some(second) = args.get(1) else {
                     return Ok(None);
