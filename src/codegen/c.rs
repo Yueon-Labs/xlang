@@ -1986,6 +1986,12 @@ impl CGen {
             "    clock_gettime(CLOCK_MONOTONIC, &ts);",
             "    return (int32_t)ts.tv_sec;",
             "}",
+            "// Wall-clock Unix epoch seconds (time(NULL)), as int32. Unlike now_s",
+            "// (monotonic), this is the real date/time — use for `date -d yesterday`",
+            "// style relative-date arithmetic. Y2038-bounded (int32).",
+            "int32_t __xlang_time_now() {",
+            "    return (int32_t)time(NULL);",
+            "}",
             "",
         ];
         for line in lines {
@@ -3020,6 +3026,7 @@ impl CGen {
             "ignore_sigpipe" => "signal(SIGPIPE, SIG_IGN)".to_string(),
             "time_str" => "__xlang_time_str()".to_string(),
             "now_s" => "__xlang_now_s()".to_string(),
+            "time_now" => "__xlang_time_now()".to_string(),
             "random_seed" => "srand((unsigned)time(NULL))".to_string(),
             "getcwd" => "__xlang_getcwd()".to_string(),
             "env_count" => "__xlang_env_count()".to_string(),
@@ -3666,6 +3673,18 @@ mod tests {
         assert!(
             c.contains("char* __xlang_time_format_at(const char* fmt, int32_t epoch)"),
             "no time_format_at helper definition: {c}"
+        );
+    }
+
+    #[test]
+    fn emits_time_now_wall_epoch_builtin() {
+        // `time_now()` → wall-clock epoch (time(NULL)), distinct from the
+        // monotonic `now_s`. Used by relative-date arithmetic (date -d yesterday).
+        let c = gen_c("module main\nfn main(): i32 { let t: i32 = time_now() return t }");
+        assert!(c.contains("__xlang_time_now()"), "no time_now call: {c}");
+        assert!(
+            c.contains("int32_t __xlang_time_now()"),
+            "no time_now helper definition: {c}"
         );
     }
 
