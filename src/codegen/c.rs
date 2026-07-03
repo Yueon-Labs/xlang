@@ -3116,13 +3116,15 @@ impl CGen {
                 Ok(format!("({name}){{ {} }}", parts.join(", ")))
             }
             Expr::IndexExpr { object, index } => {
-                // Both Array<T,N> and Slice<T> store elements in `.data`, so
-                // indexing lowers uniformly.
-                Ok(format!(
-                    "{}.data[{}]",
-                    self.gen_expr(object)?,
-                    self.gen_expr(index)?
-                ))
+                let idx_c = self.gen_expr(index)?;
+                // String/Str indexing: `s[i]` → byte value as i32 (unsigned).
+                // Same as str_char_at but with the natural subscript syntax.
+                if self.types.is_string(object) {
+                    let obj_c = self.gen_expr(object)?;
+                    return Ok(format!("((int32_t)(unsigned char){obj_c}[{idx_c}])"));
+                }
+                // Array<T,N> and Slice<T>/Vec<T> store elements in `.data`.
+                Ok(format!("{}.data[{idx_c}]", self.gen_expr(object)?))
             }
             Expr::RangeExpr { .. } => Err(XError::Codegen(
                 "range expressions (a..b) are only supported as the iterable of a `for` loop"
