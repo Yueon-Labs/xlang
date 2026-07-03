@@ -2584,6 +2584,24 @@ impl CGen {
             }
             "chdir" => format!("chdir(({a}))"),
             "make_dir" => format!("mkdir({a}, 0755)"),
+            "chown_file" => {
+                let Some(second) = args.get(1) else {
+                    return Ok(None);
+                };
+                let b = self.gen_expr(second)?;
+                let Some(third) = args.get(2) else {
+                    return Ok(None);
+                };
+                let c = self.gen_expr(third)?;
+                format!("chown({a}, {b}, {c})")
+            }
+            "chgrp_file" => {
+                let Some(second) = args.get(1) else {
+                    return Ok(None);
+                };
+                let b = self.gen_expr(second)?;
+                format!("chown({a}, -1, {b})")
+            }
             "kill" => {
                 let Some(second) = args.get(1) else {
                     return Ok(None);
