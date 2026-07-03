@@ -422,6 +422,13 @@ impl CGen {
                     "void {push_name}({alias} *v, {elem_c} x) {{\n    if (v->len == v->cap) {{\n        v->cap = v->cap ? v->cap * 2 : 4;\n        v->data = ({elem_c} *)realloc(v->data, v->cap * sizeof({elem_c}));\n    }}\n    v->data[v->len++] = x;\n}}"
                 )
             });
+            // Per-type pop helper: decrements len, returns the old last element.
+            let pop_name = format!("__xlang_vec_pop_{elem_suffix}");
+            typedefs.entry(pop_name.clone()).or_insert_with(|| {
+                format!(
+                    "{elem_c} {pop_name}({alias} *v) {{\n    if (v->len == 0) return ({elem_c})0;\n    return v->data[--v->len];\n}}"
+                )
+            });
         }
         Ok(())
     }
@@ -2720,6 +2727,35 @@ impl CGen {
         )))
     }
 
+    /// Vec pop: `v.pop()` → `__xlang_vec_pop_T(&v)`. Mirrors try_vec_push_call's
+    /// receiver-type resolution (variable or type-map field access).
+    fn try_vec_pop_call(
+        &self,
+        callee: &Spanned<Expr>,
+        args: &[Spanned<Expr>],
+    ) -> XResult<Option<String>> {
+        let Expr::FieldAccessExpr { object, field } = &callee.node else {
+            return Ok(None);
+        };
+        if field != "pop" || !args.is_empty() {
+            return Ok(None);
+        }
+        let obj_ty = if let Expr::Identifier { name } = &object.node {
+            self.lookup_var(name).cloned()
+        } else {
+            self.types.type_node(object)
+        };
+        let Some(TypeNode::TypeExpr { name, args: targs }) = obj_ty else {
+            return Ok(None);
+        };
+        if name != "Vec" || targs.len() != 1 {
+            return Ok(None);
+        }
+        let elem_suffix = self.c_type_suffix(&targs[0])?;
+        let v_c = self.gen_expr(object)?;
+        Ok(Some(format!("__xlang_vec_pop_{elem_suffix}(&{v_c})")))
+    }
+
     /// Zero-argument builtins (`fork`, `getpid`) — lower to the C calls. They
     /// need <unistd.h>, which the guarded networking preamble includes on Linux.
     fn try_zero_arg_call(
@@ -2875,6 +2911,10 @@ impl CGen {
                     return Ok(rendered);
                 }
                 if let Some(rendered) = self.try_vec_push_call(callee, args)? {
+                    return Ok(rendered);
+                }
+                // Vec pop: `v.pop()` → __xlang_vec_pop_T(&v).
+                if let Some(rendered) = self.try_vec_pop_call(callee, args)? {
                     return Ok(rendered);
                 }
                 // Method call: `obj.method(args)` → if obj's type has a method
