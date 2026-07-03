@@ -1879,10 +1879,16 @@ impl CGen {
             "// Find sub in s starting at byte offset `from`; absolute index or -1.",
             "int32_t __xlang_str_find_from(const char* s, const char* sub, int32_t from) {",
             "    if (from < 0) from = 0;",
-            "    // O(1) terminal check (no strlen — strlen-per-call made loops over",
-            "    // str_find_from O(n^2), regressing wc -l's count_lines to 6s/100k).",
-            "    // Callers keep `from` <= strlen, so s[from] is a valid read.",
+            "    // O(1) terminal check (no strlen). Callers keep from <= strlen.",
             "    if (s[from] == 0) return -1;",
+            "    // Single-char needle: strchr — O(distance) on ALL platforms. The",
+            "    // generic strstr path strlens the haystack on MSVC ucrt (O(n)/call),",
+            "    // making str_find_from loops (wc -l, uniq, cut) catastrophically slow",
+            "    // on Windows. strchr scans char-by-char, no strlen.",
+            "    if (sub[1] == 0) {",
+            "        const char* p = strchr(s + from, sub[0]);",
+            "        return p ? (int32_t)(p - s) : -1;",
+            "    }",
             "    const char* p = strstr(s + from, sub);",
             "    return p ? (int32_t)(p - s) : -1;",
             "}",
@@ -3911,15 +3917,21 @@ mod tests {
     #[test]
     fn str_find_from_has_no_per_call_strlen() {
         // str_find_from must NOT call strlen(s) — that's O(n) per call, making
-        // loops over it (wc -l's count_lines) O(n²). Regressed wc -l on Linux.
+        // loops over it (wc -l's count_lines) O(n²). And single-char needles
+        // must use strchr (O(distance) on all platforms) — MSVC's strstr strlens
+        // the haystack (O(n)/call), making str_find_from loops slow on Windows.
         let c = gen_c("module main\nfn f(s: String): i32 { return str_find_from(s, \"x\", 0) }");
         let helper = c
             .find("int32_t __xlang_str_find_from")
             .map(|i| &c[i..])
             .unwrap_or("");
         assert!(
-            !helper[..400].contains("strlen(s)"),
+            !helper[..500].contains("strlen(s)"),
             "str_find_from calls strlen(s) per call (O(n²) in loops): {helper}"
+        );
+        assert!(
+            helper[..500].contains("strchr"),
+            "str_find_from doesn't use strchr for single-char needles: {helper}"
         );
     }
 
