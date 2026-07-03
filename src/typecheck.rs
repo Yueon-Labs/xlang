@@ -1163,9 +1163,9 @@ fn builtin_return_type(name: &str) -> Option<CheckedType> {
         // String-producing.
         "str_concat" | "str_lower" | "str_upper" | "str_replace" | "str_replace_first"
         | "str_repeat" | "str_slice" | "str_trim" | "str_reverse" | "str_translate"
-        | "str_delete" | "chr" | "int_to_str" | "float_to_str" | "read_file" | "read_stdin"
-        | "recv_str" | "recv_all" | "rbuf_str" | "tls_read" | "argv" | "sb_str" | "time_format"
-        | "time_format_utc" | "time_format_at" | "time_format_at_utc" => {
+        | "str_delete" | "cat_show" | "chr" | "int_to_str" | "float_to_str" | "read_file"
+        | "read_stdin" | "recv_str" | "recv_all" | "rbuf_str" | "tls_read" | "argv" | "sb_str"
+        | "time_format" | "time_format_utc" | "time_format_at" | "time_format_at_utc" => {
             CheckedType::named("String")
         }
         // i32-producing.
