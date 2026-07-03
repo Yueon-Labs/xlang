@@ -1224,7 +1224,7 @@ fn builtin_return_type(name: &str) -> Option<CheckedType> {
         | "tls_close"
         | "sendfile_stdout" => CheckedType::named("i32"),
         // String-producing (uid/gid → name lookup via getpwuid/getgrgid).
-        "uid_to_name" | "gid_to_name" => CheckedType::named("String"),
+        "uid_to_name" | "gid_to_name" | "read_utmp" => CheckedType::named("String"),
         // f64-producing.
         "str_to_float" | "int_to_f64" => CheckedType::named("f64"),
         // Note: the boolean string-search builtins (str_contains,
