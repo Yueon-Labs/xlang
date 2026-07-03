@@ -1685,8 +1685,13 @@ impl CGen {
             "int32_t __xlang_str_contains(const char* s, const char* sub) {",
             "    return strstr(s, sub) != NULL ? 1 : 0;",
             "}",
+            // float_to_str: same rotating-pool trick as int_to_str — no per-call
+            // malloc. Floats format into a bounded buffer (%g, ≤ ~20 chars).
+            "static char __xlang_ftoa_pool[8][32];",
+            "static int __xlang_ftoa_idx = 0;",
             "char* __xlang_float_to_str(double f) {",
-            "    char* out = (char*)malloc(32);",
+            "    char* out = __xlang_ftoa_pool[__xlang_ftoa_idx];",
+            "    __xlang_ftoa_idx = (__xlang_ftoa_idx + 1) & 7;",
             "    snprintf(out, 32, \"%g\", f);",
             "    return out;",
             "}",
