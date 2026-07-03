@@ -84,6 +84,11 @@ impl Lexer {
                 continue;
             }
 
+            if ch == '\'' {
+                self.lex_char();
+                continue;
+            }
+
             if let Some(sym) = self.match_multi_symbol() {
                 self.push(TokenKind::Symbol, sym);
                 continue;
@@ -257,6 +262,63 @@ impl Lexer {
         }
     }
 
+    /// Lex a char literal `'x'` / `'\n'` → an Int token holding the code point
+    /// (ASCII code for ASCII chars). Supports the usual escapes. Multi-byte
+    /// UTF-8 chars yield their Unicode scalar (rare in practice).
+    fn lex_char(&mut self) {
+        let start_byte = self.byte_offset;
+        self.advance(); // opening '
+        if self.is_eof() {
+            self.diags.push(Diagnostic::error(
+                ErrorCode::LexUnterminatedString,
+                Span::new(self.file_id, start_byte as u32, self.byte_offset as u32),
+                "unterminated char literal",
+            ));
+            return;
+        }
+        let first = self.advance();
+        let code: i32 = if first == '\\' {
+            if self.is_eof() {
+                self.diags.push(Diagnostic::error(
+                    ErrorCode::LexUnterminatedString,
+                    Span::new(self.file_id, start_byte as u32, self.byte_offset as u32),
+                    "unterminated char literal escape",
+                ));
+                return;
+            }
+            let esc = self.advance();
+            match esc {
+                'n' => 10,
+                't' => 9,
+                'r' => 13,
+                '\\' => 92,
+                '\'' => 39,
+                '"' => 34,
+                '0' => 0,
+                'e' => 27,
+                other => other as i32,
+            }
+        } else {
+            first as i32
+        };
+        if self.is_eof() || self.peek_char(0) != '\'' {
+            self.diags.push(Diagnostic::error(
+                ErrorCode::LexUnterminatedString,
+                Span::new(self.file_id, start_byte as u32, self.byte_offset as u32),
+                "unterminated char literal (missing closing ')",
+            ));
+            return;
+        }
+        self.advance(); // closing '
+        let end_byte = self.byte_offset;
+        self.tokens.push(Token {
+            kind: TokenKind::Int,
+            text: code.to_string(),
+            start: start_byte as u32,
+            end: end_byte as u32,
+        });
+    }
+
     fn lex_string(&mut self) {
         let start_byte = self.byte_offset;
         self.advance(); // opening quote
@@ -408,6 +470,26 @@ mod tests {
             ("0xFF_FF", "65535"), // underscore separator allowed
             ("0", "0"),           // plain zero stays decimal
             ("255", "255"),       // plain decimal unaffected
+        ];
+        for (src, want) in cases {
+            let (toks, _) = lex(src);
+            assert_eq!(toks[0].kind, TokenKind::Int, "{src}: kind");
+            assert_eq!(toks[0].text, want, "{src}: value");
+        }
+    }
+
+    #[test]
+    fn lexes_char_literals() {
+        // 'x' / '\n' → an Int token with the code point.
+        let cases = [
+            ("'A'", "65"),
+            ("'a'", "97"),
+            ("'0'", "48"),
+            ("'\\n'", "10"),
+            ("'\\t'", "9"),
+            ("'\\\\'", "92"),
+            ("'\\''", "39"),
+            ("'\\0'", "0"),
         ];
         for (src, want) in cases {
             let (toks, _) = lex(src);
