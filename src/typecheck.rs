@@ -1164,7 +1164,8 @@ fn builtin_return_type(name: &str) -> Option<CheckedType> {
         "str_concat" | "str_lower" | "str_upper" | "str_replace" | "str_replace_first"
         | "str_repeat" | "str_slice" | "str_trim" | "str_reverse" | "str_translate" | "chr"
         | "int_to_str" | "float_to_str" | "read_file" | "read_stdin" | "recv_str" | "rbuf_str"
-        | "argv" | "sb_str" | "time_format" | "time_format_utc" => CheckedType::named("String"),
+        | "argv" | "sb_str" | "time_format" | "time_format_utc" | "time_format_at"
+        | "time_format_at_utc" => CheckedType::named("String"),
         // i32-producing.
         "str_len" | "str_char_at" | "str_find" | "str_find_from" | "str_to_int"
         | "str_to_int_oct" | "str_cmp" | "argc" | "vec_len" | "abs" | "max" | "min"

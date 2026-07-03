@@ -1959,6 +1959,25 @@ impl CGen {
             "    strftime(s, 256, fmt, tm);",
             "    return s;",
             "}",
+            "// Format an ARBITRARY time given as a Unix epoch (int32 seconds), in local",
+            "// time. Used by `date -d @EPOCH` and `date -r FILE` (file mtime). The",
+            "// epoch is int32 (matches __xlang_stat_field's mtime) — Y2038-bounded.",
+            "char* __xlang_time_format_at(const char* fmt, int32_t epoch) {",
+            "    setlocale(LC_TIME, \"\");",
+            "    time_t t = (time_t)epoch;",
+            "    struct tm* tm = localtime(&t);",
+            "    char* s = (char*)malloc(256);",
+            "    strftime(s, 256, fmt, tm);",
+            "    return s;",
+            "}",
+            "// Format an arbitrary epoch in UTC (gmtime). Same int32 caveat.",
+            "char* __xlang_time_format_at_utc(const char* fmt, int32_t epoch) {",
+            "    time_t t = (time_t)epoch;",
+            "    struct tm* tm = gmtime(&t);",
+            "    char* s = (char*)malloc(256);",
+            "    strftime(s, 256, fmt, tm);",
+            "    return s;",
+            "}",
             "// Monotonic seconds since an arbitrary epoch (CLOCK_MONOTONIC), as int32.",
             "// Overflow-safe for ~68 years. Used for elapsed-time measurement (e.g. the",
             "// load generator's per-worker duration timing) — NOT wall-clock time.",
@@ -2531,6 +2550,20 @@ impl CGen {
                 };
                 let b = self.gen_expr(second)?;
                 format!("__xlang_str_repeat({a}, {b})")
+            }
+            "time_format_at" => {
+                let Some(second) = args.get(1) else {
+                    return Ok(None);
+                };
+                let b = self.gen_expr(second)?;
+                format!("__xlang_time_format_at({a}, {b})")
+            }
+            "time_format_at_utc" => {
+                let Some(second) = args.get(1) else {
+                    return Ok(None);
+                };
+                let b = self.gen_expr(second)?;
+                format!("__xlang_time_format_at_utc({a}, {b})")
             }
             "chr" => format!("__xlang_chr({a})"),
             "abs" => format!("__xlang_abs({a})"),
@@ -3604,7 +3637,7 @@ mod tests {
         // `time_format(fmt)` / `time_format_utc(fmt)` lower to the strftime
         // wrappers, and the wrappers themselves are emitted into the preamble.
         let c = gen_c(
-            "module main\nfn main(): i32 { let a: String = time_format(\"%Y-%m-%d\") let b: String = time_format_utc(\"%H:%M:%S\") return 0 }",
+            "module main\nfn main(): i32 { let a: String = time_format(\"%Y-%m-%d\") let b: String = time_format_utc(\"%H:%M:%S\") let d: String = time_format_at(\"%Y\", 0) let e: String = time_format_at_utc(\"%Y\", 0) return 0 }",
         );
         assert!(
             c.contains("__xlang_time_format("),
@@ -3615,12 +3648,24 @@ mod tests {
             "no time_format_utc call: {c}"
         );
         assert!(
+            c.contains("__xlang_time_format_at("),
+            "no time_format_at call: {c}"
+        );
+        assert!(
+            c.contains("__xlang_time_format_at_utc("),
+            "no time_format_at_utc call: {c}"
+        );
+        assert!(
             c.contains("char* __xlang_time_format(const char* fmt)"),
             "no time_format helper definition: {c}"
         );
         assert!(
             c.contains("char* __xlang_time_format_utc(const char* fmt)"),
             "no time_format_utc helper definition: {c}"
+        );
+        assert!(
+            c.contains("char* __xlang_time_format_at(const char* fmt, int32_t epoch)"),
+            "no time_format_at helper definition: {c}"
         );
     }
 
