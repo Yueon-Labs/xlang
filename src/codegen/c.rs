@@ -481,6 +481,20 @@ impl CGen {
                     "{elem_c} {pop_name}({alias} *v) {{\n    if (v->len == 0) return ({elem_c}){{0}};\n    return v->data[--v->len];\n}}"
                 )
             });
+            // Per-type insert helper: shifts elements right, inserts at index.
+            let insert_name = format!("__xlang_vec_insert_{elem_suffix}");
+            typedefs.entry(insert_name.clone()).or_insert_with(|| {
+                format!(
+                    "void {insert_name}({alias} *v, size_t idx, {elem_c} x) {{\n    if (v->len == v->cap) {{\n        v->cap = v->cap ? v->cap * 2 : 4;\n        v->data = ({elem_c} *)realloc(v->data, v->cap * sizeof({elem_c}));\n    }}\n    if (idx > v->len) idx = v->len;\n    for (size_t i = v->len; i > idx; i--) v->data[i] = v->data[i-1];\n    v->data[idx] = x;\n    v->len++;\n}}"
+                )
+            });
+            // Per-type remove_at helper: removes element at index, shifts left.
+            let remove_name = format!("__xlang_vec_remove_{elem_suffix}");
+            typedefs.entry(remove_name.clone()).or_insert_with(|| {
+                format!(
+                    "{elem_c} {remove_name}({alias} *v, size_t idx) {{\n    if (v->len == 0) return ({elem_c}){{0}};\n    {elem_c} old = v->data[idx];\n    for (size_t i = idx; i < v->len - 1; i++) v->data[i] = v->data[i+1];\n    v->len--;\n    return old;\n}}"
+                )
+            });
         }
         Ok(())
     }
@@ -2820,6 +2834,7 @@ impl CGen {
 
     /// Vec/Slice/Array method `len()` → `obj.len` (the runtime field).
     /// Also handles `is_empty()` → `(obj.len == 0)`.
+    /// Also handles Vec `insert(idx, val)` and `remove_at(idx)`.
     fn try_vec_len_call(
         &self,
         callee: &Spanned<Expr>,
@@ -2828,9 +2843,6 @@ impl CGen {
         let Expr::FieldAccessExpr { object, field } = &callee.node else {
             return Ok(None);
         };
-        if !args.is_empty() {
-            return Ok(None);
-        }
         let obj_ty = if let Expr::Identifier { name } = &object.node {
             self.lookup_var(name).cloned()
         } else {
@@ -2848,8 +2860,27 @@ impl CGen {
         }
         let obj_c = self.gen_expr(object)?;
         match field.as_str() {
-            "len" => Ok(Some(format!("({obj_c}.len)"))),
-            "is_empty" => Ok(Some(format!("({obj_c}.len == 0)"))),
+            "len" if args.is_empty() => Ok(Some(format!("({obj_c}.len)"))),
+            "is_empty" if args.is_empty() => Ok(Some(format!("({obj_c}.len == 0)"))),
+            _ if name == "Vec" && targs.len() == 1 => {
+                let elem_suffix = self.c_type_suffix(&targs[0])?;
+                match field.as_str() {
+                    "insert" if args.len() == 2 => {
+                        let idx = self.gen_expr(&args[0])?;
+                        let val = self.gen_expr(&args[1])?;
+                        Ok(Some(format!(
+                            "__xlang_vec_insert_{elem_suffix}(&{obj_c}, {idx}, {val})"
+                        )))
+                    }
+                    "remove_at" if args.len() == 1 => {
+                        let idx = self.gen_expr(&args[0])?;
+                        Ok(Some(format!(
+                            "__xlang_vec_remove_{elem_suffix}(&{obj_c}, {idx})"
+                        )))
+                    }
+                    _ => Ok(None),
+                }
+            }
             _ => Ok(None),
         }
     }
