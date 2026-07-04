@@ -69,6 +69,7 @@ fn handle(msg: &Value, docs: &mut HashMap<String, String>) -> bool {
                     "definitionProvider": true,
                     "documentSymbolProvider": true,
                     "referencesProvider": true,
+                    "foldingRangeProvider": true,
                     "completionProvider": { "triggerCharacters": ["."] }
                 }
             }
@@ -134,6 +135,15 @@ fn handle(msg: &Value, docs: &mut HashMap<String, String>) -> bool {
                         "selectionRange": lsp_range(&e.range),
                     })
                 })
+                .collect();
+            send(&json!({ "jsonrpc": "2.0", "id": id, "result": items }));
+        }
+        "textDocument/foldingRange" => {
+            let uri = uri(&params);
+            let ranges = lsp::folding_ranges(&uri_text(&uri, docs), &uri);
+            let items: Vec<Value> = ranges
+                .iter()
+                .map(|(start, end)| json!({ "startLine": start, "endLine": end }))
                 .collect();
             send(&json!({ "jsonrpc": "2.0", "id": id, "result": items }));
         }
