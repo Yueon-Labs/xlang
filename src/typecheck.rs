@@ -1196,6 +1196,7 @@ fn builtin_return_type(name: &str) -> Option<CheckedType> {
         | "str_delete"
         | "str_keep"
         | "str_translate_complement"
+        | "str_join"
         | "cat_show"
         | "chr"
         | "int_to_str"
