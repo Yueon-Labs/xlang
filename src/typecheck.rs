@@ -592,6 +592,28 @@ impl Checker {
                 self.expect_numeric(&end_ty, "range end", end.span);
                 CheckedType::Unknown
             }
+            Expr::IfExpr {
+                cond,
+                then_expr,
+                else_expr,
+            } => {
+                let cond_ty = self.infer_expr(cond);
+                self.expect_assignable(
+                    &CheckedType::named("bool"),
+                    &cond_ty,
+                    "if-expression condition",
+                    cond.span,
+                );
+                let then_ty = self.infer_expr(then_expr);
+                let else_ty = self.infer_expr(else_expr);
+                self.expect_assignable(
+                    &then_ty,
+                    &else_ty,
+                    "if-expression branches must match",
+                    else_expr.span,
+                );
+                then_ty
+            }
         }
     }
 
