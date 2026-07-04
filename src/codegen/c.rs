@@ -1468,6 +1468,26 @@ impl CGen {
             "    snprintf(buf, 16, \"%d\", n);",
             "    return buf;",
             "}",
+            "// Join a Vec<String> (passed as data/len) with a separator into a new",
+            "// malloc'd NUL-terminated string. Avoids the sb_new/push/loop/str",
+            "// pattern in many tools (one malloc instead of N).",
+            "char* __xlang_str_join(const char** data, int32_t len, const char* sep) {",
+            "    if (len <= 0) { char* e = (char*)malloc(1); e[0] = 0; return e; }",
+            "    size_t cap = 256, pos = 0;",
+            "    char* buf = (char*)malloc(cap);",
+            "    buf[0] = 0;",
+            "    size_t sl = strlen(sep);",
+            "    for (int32_t i = 0; i < len; i++) {",
+            "        if (i > 0) {",
+            "            if (pos + sl + 1 > cap) { while (pos + sl + 1 > cap) cap *= 2; buf = (char*)realloc(buf, cap); }",
+            "            memcpy(buf + pos, sep, sl); pos += sl; buf[pos] = 0;",
+            "        }",
+            "        size_t il = strlen(data[i]);",
+            "        if (pos + il + 1 > cap) { while (pos + il + 1 > cap) cap *= 2; buf = (char*)realloc(buf, cap); }",
+            "        memcpy(buf + pos, data[i], il); pos += il; buf[pos] = 0;",
+            "    }",
+            "    return buf;",
+            "}",
             "// assert / panic / unreachable — program-invariant self-checks.",
             "// Each prints to stderr and exits non-zero (so a failing assertion",
             "// surfaces as a non-zero exit code, not silent wrong output).",
@@ -3023,6 +3043,13 @@ impl CGen {
                 let b = self.gen_expr(second)?;
                 format!("__xlang_str_ends_with({a}, {b})")
             }
+            "str_join" => {
+                let Some(second) = args.get(1) else {
+                    return Ok(None);
+                };
+                let b = self.gen_expr(second)?;
+                format!("__xlang_str_join(({a}).data, (int32_t)({a}).len, {b})")
+            }
             "str_replace" => {
                 let (Some(second), Some(third)) = (args.get(1), args.get(2)) else {
                     return Ok(None);
@@ -3993,6 +4020,24 @@ mod tests {
         assert!(
             c2.contains("return (strcmp(a, b) == 0);"),
             "string == should lower to strcmp: {c2}"
+        );
+    }
+
+    #[test]
+    fn lowers_str_join_to_runtime() {
+        // str_join(Vec<String>, String) → __xlang_str_join(v.data, v.len, sep).
+        // The runtime signature is `const char** data`, matching Vec<String>'s
+        // `const char** data` field exactly (no incompatible-pointer warning).
+        let c = gen_c_typed(
+            "module main\nfn f(v: Vec<String>, sep: String): String { return str_join(v, sep) }\nfn main(): i32 { return 0 }",
+        );
+        assert!(
+            c.contains("__xlang_str_join((v).data, (int32_t)(v).len, sep)"),
+            "str_join should lower to runtime: {c}"
+        );
+        assert!(
+            c.contains("char* __xlang_str_join(const char** data,"),
+            "str_join runtime preamble missing: {c}"
         );
     }
 
