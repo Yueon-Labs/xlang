@@ -2235,6 +2235,28 @@ impl CGen {
             "    regmatch_t m;",
             "    return regexec(&re, s, 1, &m, 0) == 0 ? (int32_t)m.rm_so : -1;",
             "}",
+            "// Match-span state for regex_find_from / regex_match_len: sed s/// needs",
+            "// the match [start,end) (for the replacement range and & expansion), not",
+            "// just the start offset that regex_find returns.",
+            "static int32_t __xlang_re_last_start = 0;",
+            "static int32_t __xlang_re_last_end = 0;",
+            "int32_t __xlang_regex_find_from(const char* s, const char* pattern, int32_t from) {",
+            "    static char last[1024]; static regex_t re; static int have = 0;",
+            "    if (!have || strcmp(last, pattern) != 0) {",
+            "        if (have) regfree(&re);",
+            "        if (regcomp(&re, pattern, REG_EXTENDED) != 0) { have = 0; return -1; }",
+            "        strncpy(last, pattern, 1023); last[1023] = 0; have = 1;",
+            "    }",
+            "    if (from < 0) from = 0;",
+            "    regmatch_t m;",
+            "    if (regexec(&re, s + from, 1, &m, 0) != 0) return -1;",
+            "    __xlang_re_last_start = from + (int32_t)m.rm_so;",
+            "    __xlang_re_last_end = from + (int32_t)m.rm_eo;",
+            "    return __xlang_re_last_start;",
+            "}",
+            "int32_t __xlang_regex_match_len() {",
+            "    return __xlang_re_last_end - __xlang_re_last_start;",
+            "}",
             "int32_t __xlang_tcp_listen(int32_t port) {",
             "    int fd = socket(AF_INET, SOCK_STREAM, 0);",
             "    int opt = 1;",
@@ -3007,6 +3029,14 @@ impl CGen {
                 let c = self.gen_expr(&args[2])?;
                 format!("__xlang_str_find_from({a}, {b}, {c})")
             }
+            "regex_find_from" => {
+                if args.len() < 3 {
+                    return Ok(None);
+                }
+                let b = self.gen_expr(&args[1])?;
+                let c = self.gen_expr(&args[2])?;
+                format!("__xlang_regex_find_from({a}, {b}, {c})")
+            }
             "str_translate" => {
                 let (Some(second), Some(third)) = (args.get(1), args.get(2)) else {
                     return Ok(None);
@@ -3443,6 +3473,7 @@ impl CGen {
             "read_line" => "__xlang_read_line()".to_string(),
             "sb_new" => "__xlang_sb_new()".to_string(),
             "sb_str" => "__xlang_sb_str()".to_string(),
+            "regex_match_len" => "(__xlang_regex_match_len())".to_string(),
             "ignore_sigpipe" => "signal(SIGPIPE, SIG_IGN)".to_string(),
             "time_str" => "__xlang_time_str()".to_string(),
             "now_s" => "__xlang_now_s()".to_string(),
@@ -3796,6 +3827,24 @@ mod tests {
             "no regex_match: {c}"
         );
         assert!(c.contains("#include <regex.h>"), "no regex.h: {c}");
+    }
+
+    #[test]
+    fn emits_regex_span_calls() {
+        // regex_find_from (match start from offset) + regex_match_len (last
+        // match length) give sed s/// the match [start,end) for replacement
+        // and & expansion.
+        let c = gen_c_typed(
+            "module main\nfn main(): i32 { let s: i32 = regex_find_from(\"ab42\", \"b+\", 0) return s + regex_match_len() }",
+        );
+        assert!(
+            c.contains("__xlang_regex_find_from(\"ab42\", \"b+\", 0)"),
+            "no regex_find_from: {c}"
+        );
+        assert!(
+            c.contains("__xlang_regex_match_len()"),
+            "no regex_match_len: {c}"
+        );
     }
 
     #[test]
