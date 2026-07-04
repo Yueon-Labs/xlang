@@ -241,4 +241,11 @@ pub enum Expr {
         end: Box<Spanned<Expr>>,
         inclusive: bool,
     },
+    /// `if cond { then } else { else }` as an expression — both branches are
+    /// single expressions (not statement blocks). The C ternary lowers this.
+    IfExpr {
+        cond: Box<Spanned<Expr>>,
+        then_expr: Box<Spanned<Expr>>,
+        else_expr: Box<Spanned<Expr>>,
+    },
 }

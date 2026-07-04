@@ -970,6 +970,7 @@ impl Parser {
                 Ok(expr)
             }
             _ if tok.text == "[" => self.parse_array_literal(),
+            TokenKind::Keyword if tok.text == "if" => self.parse_if_expr(),
             _ => Err(Diagnostic::error(
                 ErrorCode::ParseExpectedExpression,
                 span,
@@ -994,6 +995,34 @@ impl Parser {
         self.expect("]")?;
         Ok(Spanned::new(
             Expr::ArrayLiteral { elements },
+            Span::new(self.file_id, start, self.last_end),
+        ))
+    }
+
+    /// `if cond { expr } else { expr }` as an expression (not a statement).
+    /// Both branches are single expressions; `else if` chains via recursion.
+    fn parse_if_expr(&mut self) -> Result<Spanned<Expr>, Diagnostic> {
+        let start = self.cur_start();
+        self.expect("if")?;
+        let cond = self.parse_expr()?;
+        self.expect("{")?;
+        let then_expr = self.parse_expr()?;
+        self.expect("}")?;
+        self.expect("else")?;
+        let else_expr = if self.check("if") {
+            self.parse_if_expr()?
+        } else {
+            self.expect("{")?;
+            let e = self.parse_expr()?;
+            self.expect("}")?;
+            e
+        };
+        Ok(Spanned::new(
+            Expr::IfExpr {
+                cond: Box::new(cond),
+                then_expr: Box::new(then_expr),
+                else_expr: Box::new(else_expr),
+            },
             Span::new(self.file_id, start, self.last_end),
         ))
     }

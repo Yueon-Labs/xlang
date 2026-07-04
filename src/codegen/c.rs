@@ -3722,6 +3722,16 @@ impl CGen {
                 "range expressions (a..b) are only supported as the iterable of a `for` loop"
                     .to_string(),
             )),
+            Expr::IfExpr {
+                cond,
+                then_expr,
+                else_expr,
+            } => {
+                let cond_c = self.gen_expr(cond)?;
+                let then_c = self.gen_expr(then_expr)?;
+                let else_c = self.gen_expr(else_expr)?;
+                Ok(format!("(({cond_c}) ? ({then_c}) : ({else_c}))"))
+            }
         }
     }
 }
@@ -3830,6 +3840,28 @@ mod tests {
             "module main\nfn main(): i32 { sb_new() sb_push_i32(42) sb_push_i32(-7) print_raw(sb_str()) return 0 }",
         );
         assert!(c.contains("__xlang_sb_push_i32(42)"), "no sb_push_i32: {c}");
+    }
+
+    #[test]
+    fn lowers_if_expression_to_ternary() {
+        // `if cond { X } else { Y }` as an expression → C ternary.
+        let c = gen_c_typed(
+            "module main\nfn f(n: i32): i32 { return if n > 0 { 1 } else { 0 - 1 } }\nfn main(): i32 { return 0 }",
+        );
+        assert!(
+            c.contains("(n > 0)) ? (1) : ((0 - 1))"),
+            "no if-expr ternary: {c}"
+        );
+    }
+
+    #[test]
+    fn lowers_if_expr_else_if_chain() {
+        // else-if chains nest via recursion.
+        let c = gen_c_typed(
+            "module main\nfn f(n: i32): i32 { return if n < 0 { 0 - 1 } else if n == 0 { 0 } else { 1 } }\nfn main(): i32 { return 0 }",
+        );
+        assert!(c.contains("? ("), "no ternary: {c}");
+        assert!(c.contains("n == 0"), "no else-if condition: {c}");
     }
 
     #[test]
