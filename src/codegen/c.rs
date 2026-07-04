@@ -2214,6 +2214,23 @@ impl CGen {
             "#include <errno.h>",
             "#include <sched.h>",
             "#include <sys/wait.h>",
+            // POSIX extended regex (Linux-only: <regex.h>). Powers grep/sed/awk.
+            "#include <regex.h>",
+            "int32_t __xlang_regex_match(const char* s, const char* pattern) {",
+            "    regex_t re;",
+            "    if (regcomp(&re, pattern, REG_EXTENDED | REG_NOSUB) != 0) return 0;",
+            "    int r = regexec(&re, s, 0, NULL, 0);",
+            "    regfree(&re);",
+            "    return r == 0 ? 1 : 0;",
+            "}",
+            "int32_t __xlang_regex_find(const char* s, const char* pattern) {",
+            "    regex_t re;",
+            "    if (regcomp(&re, pattern, REG_EXTENDED) != 0) return -1;",
+            "    regmatch_t m;",
+            "    int r = regexec(&re, s, 1, &m, 0);",
+            "    regfree(&re);",
+            "    return r == 0 ? (int32_t)m.rm_so : -1;",
+            "}",
             "int32_t __xlang_tcp_listen(int32_t port) {",
             "    int fd = socket(AF_INET, SOCK_STREAM, 0);",
             "    int opt = 1;",
@@ -2836,6 +2853,20 @@ impl CGen {
                 };
                 let b = self.gen_expr(second)?;
                 format!("__xlang_str_find({a}, {b})")
+            }
+            "regex_match" => {
+                let Some(second) = args.get(1) else {
+                    return Ok(None);
+                };
+                let b = self.gen_expr(second)?;
+                format!("__xlang_regex_match({a}, {b})")
+            }
+            "regex_find" => {
+                let Some(second) = args.get(1) else {
+                    return Ok(None);
+                };
+                let b = self.gen_expr(second)?;
+                format!("__xlang_regex_find({a}, {b})")
             }
             "str_slice" => {
                 if args.len() < 3 {
@@ -3747,6 +3778,20 @@ mod tests {
             c.contains("__xlang_count_newlines(\"a\\nb\\nc\")"),
             "no count_newlines: {c}"
         );
+    }
+
+    #[test]
+    fn emits_regex_calls() {
+        // POSIX regex (Linux-only: <regex.h>) — the primitive for grep/sed/awk
+        // regex support. Codegen check only (can't link without <regex.h>).
+        let c = gen_c_typed(
+            "module main\nfn main(): i32 { let m: i32 = regex_match(\"foo42\", \"fo+[0-9]+\") return m }",
+        );
+        assert!(
+            c.contains("__xlang_regex_match(\"foo42\", \"fo+[0-9]+\")"),
+            "no regex_match: {c}"
+        );
+        assert!(c.contains("#include <regex.h>"), "no regex.h: {c}");
     }
 
     #[test]
