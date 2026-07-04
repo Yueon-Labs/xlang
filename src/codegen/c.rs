@@ -2105,6 +2105,23 @@ impl CGen {
             "    __sb_buf[__sb_len++] = (char)c;",
             "    __sb_buf[__sb_len] = 0;",
             "}",
+            "// Append a decimal integer to the sb buffer — avoids the int_to_str +",
+            "// sb_push temporary allocation pattern common in coreutils.",
+            "void __xlang_sb_push_i32(int32_t n) {",
+            "    char tmp[12];",
+            "    int len = 0;",
+            "    uint32_t un;",
+            "    if (n < 0) { un = (uint32_t)(-(int64_t)n); } else { un = (uint32_t)n; }",
+            "    if (un == 0) { tmp[len++] = '0'; }",
+            "    while (un > 0) { tmp[len++] = '0' + (char)(un % 10); un /= 10; }",
+            "    if (n < 0) { tmp[len++] = '-'; }",
+            "    if (__sb_len + (size_t)len + 1 > __sb_cap) {",
+            "        while (__sb_len + (size_t)len + 1 > __sb_cap) __sb_cap *= 2;",
+            "        __sb_buf = (char*)realloc(__sb_buf, __sb_cap);",
+            "    }",
+            "    while (len > 0) { __sb_buf[__sb_len++] = tmp[--len]; }",
+            "    __sb_buf[__sb_len] = 0;",
+            "}",
             "// Append s[start..end) to the sb buffer directly (no per-call malloc, no",
             "// strlen of the whole string — clamps end at the first NUL from start).",
             "// Lets streaming tools (tac/cut/uniq/...) emit per-line substrings without",
@@ -3152,6 +3169,7 @@ impl CGen {
             "random_int" => format!("(int32_t)(rand() % ({a}))"),
             "sb_push" => format!("__xlang_sb_push({a})"),
             "sb_push_char" => format!("__xlang_sb_push_char({a})"),
+            "sb_push_i32" => format!("__xlang_sb_push_i32({a})"),
             "getenv" => format!("(getenv({a}) ? getenv({a}) : \"\")"),
             "setenv" => {
                 let Some(second) = args.get(1) else {
@@ -3803,6 +3821,15 @@ mod tests {
             c.contains("__xlang_sb_push_slice(\"hello\", 1, 4)"),
             "no sb_push_slice: {c}"
         );
+    }
+
+    #[test]
+    fn emits_sb_push_i32_call() {
+        // sb_push_i32 appends a decimal integer directly (no int_to_str temp).
+        let c = gen_c_typed(
+            "module main\nfn main(): i32 { sb_new() sb_push_i32(42) sb_push_i32(-7) print_raw(sb_str()) return 0 }",
+        );
+        assert!(c.contains("__xlang_sb_push_i32(42)"), "no sb_push_i32: {c}");
     }
 
     #[test]
