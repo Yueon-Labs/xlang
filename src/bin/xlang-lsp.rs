@@ -67,6 +67,7 @@ fn handle(msg: &Value, docs: &mut HashMap<String, String>) -> bool {
                     "textDocumentSync": 1, // full sync
                     "hoverProvider": true,
                     "definitionProvider": true,
+                    "documentSymbolProvider": true,
                     "completionProvider": { "triggerCharacters": ["."] }
                 }
             }
@@ -117,6 +118,22 @@ fn handle(msg: &Value, docs: &mut HashMap<String, String>) -> bool {
             let uri = uri(&params);
             let names = lsp::completion_names(&uri_text(&uri, docs), &uri);
             let items: Vec<Value> = names.iter().map(|n| json!({ "label": n })).collect();
+            send(&json!({ "jsonrpc": "2.0", "id": id, "result": items }));
+        }
+        "textDocument/documentSymbol" => {
+            let uri = uri(&params);
+            let entries = lsp::document_symbols(&uri_text(&uri, docs), &uri);
+            let items: Vec<Value> = entries
+                .iter()
+                .map(|e| {
+                    json!({
+                        "name": e.name,
+                        "kind": e.kind,
+                        "range": lsp_range(&e.range),
+                        "selectionRange": lsp_range(&e.range),
+                    })
+                })
+                .collect();
             send(&json!({ "jsonrpc": "2.0", "id": id, "result": items }));
         }
         "shutdown" => send(&json!({ "jsonrpc": "2.0", "id": id, "result": Value::Null })),
