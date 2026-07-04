@@ -2809,6 +2809,7 @@ impl CGen {
         let rendered = match name.as_str() {
             "str_len" => format!("(int32_t)strlen({a})"),
             "count_newlines" => format!("__xlang_count_newlines({a})"),
+            "exit" => format!("exit({a})"),
             "argv" => format!("__xlang_argv_g[{a}]"),
             "print_raw" => format!("printf(\"%s\", {a})"),
             "eprint_raw" => format!("fprintf(stderr, \"%s\", {a})"),
@@ -3813,6 +3814,14 @@ mod tests {
             c.contains("__xlang_count_newlines(\"a\\nb\\nc\")"),
             "no count_newlines: {c}"
         );
+    }
+
+    #[test]
+    fn emits_exit_call() {
+        // exit(code) — the basic process-termination primitive xlang lacked;
+        // needed by find -exec's child (after a failed exec) and generally.
+        let c = gen_c_typed("module main\nfn main(): i32 { if argc() > 1 { exit(2) } return 0 }");
+        assert!(c.contains("exit(2);"), "no exit: {c}");
     }
 
     #[test]
