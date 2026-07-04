@@ -1198,6 +1198,8 @@ fn builtin_return_type(name: &str) -> Option<CheckedType> {
         | "regex_match"
         | "regex_find"
         | "str_find_from"
+        | "regex_find_from"
+        | "regex_match_len"
         | "str_to_int"
         | "str_to_int_oct"
         | "str_cmp"
