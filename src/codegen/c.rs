@@ -1784,6 +1784,13 @@ impl CGen {
             "    const char* p = strstr(s, sub);",
             "    return p ? (int32_t)(p - s) : -1;",
             "}",
+            "// One-pass newline count (tight loop) for `wc -l`. The str_find_from",
+            "// per-newline loop is N function calls; this is one call, O(n).",
+            "int32_t __xlang_count_newlines(const char* s) {",
+            "    int32_t n = 0;",
+            "    while (*s) { if (*s == '\\n') n++; s++; }",
+            "    return n;",
+            "}",
             "char* __xlang_str_slice(const char* s, int32_t start, int32_t end) {",
             "    if (start < 0) start = 0;",
             "    if (end < start) end = start;",
@@ -2758,6 +2765,7 @@ impl CGen {
         let a = self.gen_expr(first)?;
         let rendered = match name.as_str() {
             "str_len" => format!("(int32_t)strlen({a})"),
+            "count_newlines" => format!("__xlang_count_newlines({a})"),
             "argv" => format!("__xlang_argv_g[{a}]"),
             "print_raw" => format!("printf(\"%s\", {a})"),
             "eprint_raw" => format!("fprintf(stderr, \"%s\", {a})"),
@@ -3727,6 +3735,17 @@ mod tests {
         assert!(
             c.contains("__xlang_sb_push_slice(\"hello\", 1, 4)"),
             "no sb_push_slice: {c}"
+        );
+    }
+
+    #[test]
+    fn emits_count_newlines_call() {
+        // count_newlines: one-pass C newline count for `wc -l` (was a
+        // str_find_from loop = N function calls).
+        let c = gen_c_typed("module main\nfn main(): i32 { return count_newlines(\"a\\nb\\nc\") }");
+        assert!(
+            c.contains("__xlang_count_newlines(\"a\\nb\\nc\")"),
+            "no count_newlines: {c}"
         );
     }
 

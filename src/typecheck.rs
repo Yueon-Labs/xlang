@@ -1192,6 +1192,7 @@ fn builtin_return_type(name: &str) -> Option<CheckedType> {
         | "time_format_at_utc" => CheckedType::named("String"),
         // i32-producing.
         "str_len"
+        | "count_newlines"
         | "str_char_at"
         | "str_find"
         | "str_find_from"
