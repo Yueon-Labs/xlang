@@ -118,6 +118,15 @@ pub fn document_symbols(source: &str, file: &str) -> Vec<DocumentSymbolEntry> {
     out
 }
 
+/// Foldable regions for `textDocument/foldingRange`: (start_line, end_line) per
+/// top-level function/struct, in source order — the editor folds each body.
+pub fn folding_ranges(source: &str, file: &str) -> Vec<(u32, u32)> {
+    document_symbols(source, file)
+        .iter()
+        .map(|s| (s.range.line, s.range.end_line))
+        .collect()
+}
+
 /// Whole-word occurrences of the identifier at 1-based `(line, col)`, as ranges
 /// — for `textDocument/references` (and documentHighlight). Text-based (not
 /// AST-resolved): accurate for top-level symbols (functions/structs/types), may
@@ -219,6 +228,16 @@ mod tests {
         assert!(names.contains(&"main"), "fn main missing: {names:?}");
         assert_eq!(syms.iter().find(|s| s.name == "Point").unwrap().kind, 23); // Struct
         assert_eq!(syms.iter().find(|s| s.name == "add").unwrap().kind, 12); // Function
+    }
+
+    #[test]
+    fn folding_ranges_cover_each_symbol() {
+        // Point spans lines 2-5, add is line 6, main is line 7 → 3 foldable ranges.
+        let src = "module main\nstruct Point {\n    x: i32\n    y: i32\n}\nfn add(a: i32, b: i32): i32 { return a + b }\nfn main(): i32 { return 0 }";
+        let ranges = folding_ranges(src, "<t>");
+        assert_eq!(ranges.len(), 3, "expected 3 foldable regions: {ranges:?}");
+        // Each range is well-formed (end >= start).
+        assert!(ranges.iter().all(|(s, e)| e >= s));
     }
 
     #[test]
