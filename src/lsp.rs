@@ -84,6 +84,39 @@ fn contains(r: &Range, line: u32, col: u32) -> bool {
     after_start && before_end
 }
 
+/// A document-outline entry for `textDocument/documentSymbol`: a top-level
+/// name, its LSP SymbolKind (Function = 12, Struct = 23), and its range.
+pub struct DocumentSymbolEntry {
+    pub name: String,
+    pub kind: u32,
+    pub range: Range,
+}
+
+/// Top-level functions + structs (in source order) for the editor outline.
+pub fn document_symbols(source: &str, file: &str) -> Vec<DocumentSymbolEntry> {
+    let (program, _diags) = parse_source(source, file);
+    let program = match program {
+        Some(p) => p,
+        None => return Vec::new(),
+    };
+    let index = symbols::build_index(&program.items, source);
+    let mut out: Vec<DocumentSymbolEntry> = index
+        .functions
+        .iter()
+        .map(|f| DocumentSymbolEntry {
+            name: f.name.clone(),
+            kind: 12, // Function
+            range: f.range.clone(),
+        })
+        .collect();
+    out.extend(index.structs.iter().map(|s| DocumentSymbolEntry {
+        name: s.name.clone(),
+        kind: 23, // Struct
+        range: s.range.clone(),
+    }));
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -122,6 +155,18 @@ mod tests {
         let src = "module main\nfn main(): i32 {\n    let x: i32 = true\n    return x\n}\n";
         let ds = diagnostics(src, "<t>");
         assert!(!ds.is_empty(), "expected a type-mismatch diagnostic");
+    }
+
+    #[test]
+    fn document_symbols_lists_functions_and_structs() {
+        let src = "module main\nstruct Point {\n    x: i32\n    y: i32\n}\nfn add(a: i32, b: i32): i32 { return a + b }\nfn main(): i32 { return 0 }";
+        let syms = document_symbols(src, "<t>");
+        let names: Vec<&str> = syms.iter().map(|s| s.name.as_str()).collect();
+        assert!(names.contains(&"Point"), "struct missing: {names:?}");
+        assert!(names.contains(&"add"), "fn add missing: {names:?}");
+        assert!(names.contains(&"main"), "fn main missing: {names:?}");
+        assert_eq!(syms.iter().find(|s| s.name == "Point").unwrap().kind, 23); // Struct
+        assert_eq!(syms.iter().find(|s| s.name == "add").unwrap().kind, 12); // Function
     }
 }
 
