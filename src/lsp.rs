@@ -4,6 +4,7 @@
 //! go-to-definition (the defining range), and completion (top-level names).
 
 use crate::driver::{diagnostics_to_serializable, parse_source};
+use crate::source::LineIndex;
 use crate::symbols::{self, Range, SymbolIndex};
 
 /// All diagnostics for `source`, in LSP-serializable form (1-based line/col +
@@ -117,6 +118,57 @@ pub fn document_symbols(source: &str, file: &str) -> Vec<DocumentSymbolEntry> {
     out
 }
 
+/// Whole-word occurrences of the identifier at 1-based `(line, col)`, as ranges
+/// — for `textDocument/references` (and documentHighlight). Text-based (not
+/// AST-resolved): accurate for top-level symbols (functions/structs/types), may
+/// over-match same-named locals in unrelated scopes. The definition occurrence
+/// is included. Returns an empty vec if the cursor isn't on an identifier.
+pub fn references(source: &str, _file: &str, line: u32, col: u32) -> Vec<Range> {
+    let idx = LineIndex::new(source);
+    let bytes = source.as_bytes();
+    let is_word = |b: u8| b.is_ascii_alphanumeric() || b == b'_';
+    let at = (idx.byte_offset(line, col) as usize).min(bytes.len().saturating_sub(1));
+    // Extend left/right from the cursor to the identifier extent.
+    let mut s = at;
+    while s > 0 && is_word(bytes[s - 1]) {
+        s -= 1;
+    }
+    let mut e = at;
+    while e < bytes.len() && is_word(bytes[e]) {
+        e += 1;
+    }
+    if s == e {
+        return Vec::new();
+    }
+    let needle = &source[s..e];
+    let nlen = (e - s) as u32;
+    let n = bytes.len();
+    let mut out = Vec::new();
+    let mut i = 0usize;
+    while i < n {
+        match source[i..].find(needle) {
+            Some(rel) => {
+                let start = i + rel;
+                let end = start + needle.len();
+                let left_ok = start == 0 || !is_word(bytes[start - 1]);
+                let right_ok = end == n || !is_word(bytes[end]);
+                if left_ok && right_ok {
+                    let (sl, sc) = idx.line_col(start as u32);
+                    out.push(Range {
+                        line: sl as u32,
+                        col: sc as u32,
+                        end_line: sl as u32,
+                        end_col: sc as u32 + nlen,
+                    });
+                }
+                i = end;
+            }
+            None => break,
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -167,6 +219,19 @@ mod tests {
         assert!(names.contains(&"main"), "fn main missing: {names:?}");
         assert_eq!(syms.iter().find(|s| s.name == "Point").unwrap().kind, 23); // Struct
         assert_eq!(syms.iter().find(|s| s.name == "add").unwrap().kind, 12); // Function
+    }
+
+    #[test]
+    fn references_finds_all_occurrences_of_a_function() {
+        // add is declared once and called twice (whole-word, not inside "address").
+        let src = "module main\nfn add(a: i32, b: i32): i32 { return a + b }\nfn address(): i32 { return 0 }\nfn main(): i32 { return add(1, 2) + add(3, 4) }";
+        // cursor on the `add` in the declaration (line 2, col 4).
+        let refs = references(src, "<t>", 2, 4);
+        assert_eq!(
+            refs.len(),
+            3,
+            "should find decl + 2 calls, not inside 'address'"
+        );
     }
 }
 

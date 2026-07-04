@@ -68,6 +68,7 @@ fn handle(msg: &Value, docs: &mut HashMap<String, String>) -> bool {
                     "hoverProvider": true,
                     "definitionProvider": true,
                     "documentSymbolProvider": true,
+                    "referencesProvider": true,
                     "completionProvider": { "triggerCharacters": ["."] }
                 }
             }
@@ -133,6 +134,15 @@ fn handle(msg: &Value, docs: &mut HashMap<String, String>) -> bool {
                         "selectionRange": lsp_range(&e.range),
                     })
                 })
+                .collect();
+            send(&json!({ "jsonrpc": "2.0", "id": id, "result": items }));
+        }
+        "textDocument/references" => {
+            let (uri, line, col) = pos(&params, docs);
+            let refs = lsp::references(&uri_text(&uri, docs), &uri, line, col);
+            let items: Vec<Value> = refs
+                .iter()
+                .map(|r| json!({ "uri": uri, "range": lsp_range(r) }))
                 .collect();
             send(&json!({ "jsonrpc": "2.0", "id": id, "result": items }));
         }

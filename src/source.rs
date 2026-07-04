@@ -131,6 +131,16 @@ impl LineIndex {
     pub fn line_count(&self) -> usize {
         self.line_starts.len()
     }
+
+    /// Byte offset of 1-based `(line, col)`. `line` is clamped to the last
+    /// line; the result is clamped to the source length. Used by the LSP to
+    /// map a cursor position to a byte offset (e.g. for references).
+    pub fn byte_offset(&self, line: u32, col: u32) -> u32 {
+        let li = (line as usize)
+            .saturating_sub(1)
+            .min(self.line_starts.len().saturating_sub(1));
+        self.line_starts[li] + col.saturating_sub(1)
+    }
 }
 
 #[cfg(test)]
