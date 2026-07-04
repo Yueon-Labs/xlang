@@ -1195,6 +1195,8 @@ fn builtin_return_type(name: &str) -> Option<CheckedType> {
         | "count_newlines"
         | "str_char_at"
         | "str_find"
+        | "regex_match"
+        | "regex_find"
         | "str_find_from"
         | "str_to_int"
         | "str_to_int_oct"
