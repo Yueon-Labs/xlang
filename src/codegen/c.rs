@@ -1804,6 +1804,24 @@ impl CGen {
             "    const char* p = strstr(s, sub);",
             "    return p ? (int32_t)(p - s) : -1;",
             "}",
+            "// Bounded substring search: first occurrence of `sub` within s[start..end),",
+            "// or -1. memchr-skips on the first char then verifies — lets tools search a",
+            "// line range of a big buffer WITHOUT a per-line str_slice (grep literal).",
+            "int32_t __xlang_str_find_range(const char* s, const char* sub, int32_t start, int32_t end) {",
+            "    size_t sl = strlen(sub);",
+            "    if (sl == 0) return start < 0 ? 0 : start;",
+            "    if (start < 0) start = 0;",
+            "    int32_t last = end - (int32_t)sl;",
+            "    int32_t i = start;",
+            "    while (i <= last) {",
+            "        const char* m = (const char*)memchr(s + i, sub[0], (size_t)(last - i + 1));",
+            "        if (!m) return -1;",
+            "        i = (int32_t)(m - s);",
+            "        if (memcmp(m, sub, sl) == 0) return i;",
+            "        i++;",
+            "    }",
+            "    return -1;",
+            "}",
             "// One-pass newline count for `wc -l`. Counts via repeated memchr",
             "// (SIMD in glibc) instead of a byte-by-byte loop — several× faster on",
             "// large text. strlen + memchr-pass are both vectorized; together they",
@@ -3104,6 +3122,15 @@ impl CGen {
                 let c = self.gen_expr(&args[2])?;
                 format!("__xlang_str_find_from({a}, {b}, {c})")
             }
+            "str_find_range" => {
+                if args.len() < 4 {
+                    return Ok(None);
+                }
+                let b = self.gen_expr(&args[1])?;
+                let c = self.gen_expr(&args[2])?;
+                let d = self.gen_expr(&args[3])?;
+                format!("__xlang_str_find_range({a}, {b}, {c}, {d})")
+            }
             "regex_find_from" => {
                 if args.len() < 3 {
                     return Ok(None);
@@ -3920,6 +3947,23 @@ mod tests {
         assert!(
             c.contains("void __xlang_sb_push_i32_pad(int32_t n, int32_t width)"),
             "no sb_push_i32_pad runtime: {c}"
+        );
+    }
+
+    #[test]
+    fn emits_str_find_range_call() {
+        // str_find_range(s, sub, start, end) → bounded memchr-based search,
+        // for grep's literal line-range matching (no per-line str_slice).
+        let c = gen_c_typed(
+            "module main\nfn f(s: String, sub: String): i32 { return str_find_range(s, sub, 0, 100) }\nfn main(): i32 { return 0 }",
+        );
+        assert!(
+            c.contains("__xlang_str_find_range(s, sub, 0, 100)"),
+            "no str_find_range: {c}"
+        );
+        assert!(
+            c.contains("int32_t __xlang_str_find_range(const char* s, const char* sub,"),
+            "no str_find_range runtime: {c}"
         );
     }
 
