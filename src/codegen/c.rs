@@ -2142,6 +2142,27 @@ impl CGen {
             "    while (len > 0) { __sb_buf[__sb_len++] = tmp[--len]; }",
             "    __sb_buf[__sb_len] = 0;",
             "}",
+            "// Append n right-justified in a field of `width` (space-padded, like",
+            "// printf %*d) directly to the sb — avoids the pad_int malloc that",
+            "// uniq -c / nl paid per line.",
+            "void __xlang_sb_push_i32_pad(int32_t n, int32_t width) {",
+            "    char tmp[12];",
+            "    int len = 0;",
+            "    uint32_t un;",
+            "    if (n < 0) { un = (uint32_t)(-(int64_t)n); } else { un = (uint32_t)n; }",
+            "    if (un == 0) { tmp[len++] = '0'; }",
+            "    while (un > 0) { tmp[len++] = '0' + (char)(un % 10); un /= 10; }",
+            "    if (n < 0) { tmp[len++] = '-'; }",
+            "    int pad = width - len;",
+            "    if (pad < 0) { pad = 0; }",
+            "    if (__sb_len + (size_t)(pad + len) + 1 > __sb_cap) {",
+            "        while (__sb_len + (size_t)(pad + len) + 1 > __sb_cap) __sb_cap *= 2;",
+            "        __sb_buf = (char*)realloc(__sb_buf, __sb_cap);",
+            "    }",
+            "    while (pad > 0) { __sb_buf[__sb_len++] = ' '; pad--; }",
+            "    while (len > 0) { __sb_buf[__sb_len++] = tmp[--len]; }",
+            "    __sb_buf[__sb_len] = 0;",
+            "}",
             "// Append s[start..end) to the sb buffer directly (no per-call malloc, no",
             "// strlen of the whole string — clamps end at the first NUL from start).",
             "// Lets streaming tools (tac/cut/uniq/...) emit per-line substrings without",
@@ -3197,6 +3218,13 @@ impl CGen {
             "sb_push" => format!("__xlang_sb_push({a})"),
             "sb_push_char" => format!("__xlang_sb_push_char({a})"),
             "sb_push_i32" => format!("__xlang_sb_push_i32({a})"),
+            "sb_push_i32_pad" => {
+                let Some(second) = args.get(1) else {
+                    return Ok(None);
+                };
+                let b = self.gen_expr(second)?;
+                format!("__xlang_sb_push_i32_pad({a}, {b})")
+            }
             "getenv" => format!("(getenv({a}) ? getenv({a}) : \"\")"),
             "setenv" => {
                 let Some(second) = args.get(1) else {
@@ -3867,6 +3895,23 @@ mod tests {
             "module main\nfn main(): i32 { sb_new() sb_push_i32(42) sb_push_i32(-7) print_raw(sb_str()) return 0 }",
         );
         assert!(c.contains("__xlang_sb_push_i32(42)"), "no sb_push_i32: {c}");
+    }
+
+    #[test]
+    fn emits_sb_push_i32_pad_call() {
+        // sb_push_i32_pad appends a width-padded integer directly (no pad_int
+        // malloc) — the uniq -c / nl per-line fix.
+        let c = gen_c_typed(
+            "module main\nfn main(): i32 { sb_new() sb_push_i32_pad(42, 7) print_raw(sb_str()) return 0 }",
+        );
+        assert!(
+            c.contains("__xlang_sb_push_i32_pad(42, 7)"),
+            "no sb_push_i32_pad: {c}"
+        );
+        assert!(
+            c.contains("void __xlang_sb_push_i32_pad(int32_t n, int32_t width)"),
+            "no sb_push_i32_pad runtime: {c}"
+        );
     }
 
     #[test]
