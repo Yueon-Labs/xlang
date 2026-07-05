@@ -2739,6 +2739,7 @@ impl CGen {
             "        case 3: return (int32_t)st.st_gid;",
             "        case 4: return (int32_t)st.st_size;",
             "        case 5: return (int32_t)st.st_mtime;",
+            "        case 6: return (int32_t)st.st_blocks;",
             "    }",
             "    return -1;",
             "}",
